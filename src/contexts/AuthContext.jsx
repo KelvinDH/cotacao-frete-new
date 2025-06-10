@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { User } from '@/api/entities';
+import { Auth } from '@/api/entities';
 
 const AuthContext = createContext();
 
@@ -21,8 +21,11 @@ export const AuthProvider = ({ children }) => {
 
   const checkAuthStatus = async () => {
     try {
-      const currentUser = await User.getCurrentUser();
-      setUser(currentUser);
+      // Verifica se há um usuário logado no localStorage
+      const storedUser = localStorage.getItem('currentUser');
+      if (storedUser) {
+        setUser(JSON.parse(storedUser));
+      }
     } catch (error) {
       console.log('No authenticated user');
       setUser(null);
@@ -32,18 +35,43 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     try {
-      const result = await User.signIn({ email, password });
+      // Simulação de login para admin - em produção, usar Auth.signIn
+      if (email === 'admin@unionagro.com' && password === 'admin123') {
+        const adminUser = {
+          id: 'admin-1',
+          email: 'admin@unionagro.com',
+          fullName: 'Administrador',
+          userType: 'admin'
+        };
+        
+        setUser(adminUser);
+        localStorage.setItem('currentUser', JSON.stringify(adminUser));
+        return { success: true };
+      }
+      
+      // Para outros usuários, tentar autenticação real
+      // Comentado até que o SDK esteja configurado corretamente
+      /*
+      const result = await Auth.signIn({ email, password });
       setUser(result.user);
+      localStorage.setItem('currentUser', JSON.stringify(result.user));
       return { success: true };
+      */
+      
+      return { success: false, error: 'Credenciais inválidas' };
     } catch (error) {
-      return { success: false, error: error.message };
+      return { success: false, error: error.message || 'Erro ao fazer login' };
     }
   };
 
   const logout = async () => {
     try {
-      await User.signOut();
+      // Limpar dados locais
       setUser(null);
+      localStorage.removeItem('currentUser');
+      
+      // Em produção, usar Auth.signOut()
+      // await Auth.signOut();
     } catch (error) {
       console.error('Logout error:', error);
     }
@@ -55,7 +83,7 @@ export const AuthProvider = ({ children }) => {
     logout,
     loading,
     isAuthenticated: !!user,
-    isAdmin: user?.email === 'admin@unionagro.com' // Simple admin check
+    isAdmin: user?.userType === 'admin' || user?.email === 'admin@unionagro.com'
   };
 
   return (

@@ -7,8 +7,8 @@ import { Button } from '@/components/ui/button';
 export default function LoginPage() {
   const { login } = useAuth();
   const [formData, setFormData] = useState({
-    email: '',
-    password: ''
+    email: 'admin@unionagro.com', // Pré-preenchido para facilitar teste
+    password: 'admin123'
   });
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -125,11 +125,14 @@ export default function LoginPage() {
             </Button>
           </form>
 
-          <div className="mt-6 text-center text-sm text-gray-500">
-            <p>Credenciais de teste:</p>
-            <p className="font-mono bg-gray-100 p-2 rounded mt-2">
-              Email: admin@unionagro.com<br />
-              Senha: admin123
+          <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-sm text-blue-800 font-medium mb-2">Credenciais de Administrador:</p>
+            <div className="text-sm text-blue-700 space-y-1">
+              <p><strong>Email:</strong> admin@unionagro.com</p>
+              <p><strong>Senha:</strong> admin123</p>
+            </div>
+            <p className="text-xs text-blue-600 mt-2">
+              Use essas credenciais para acessar como administrador e gerenciar usuários.
             </p>
           </div>
         </div>

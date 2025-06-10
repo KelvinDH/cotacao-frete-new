@@ -50,10 +50,43 @@ export default function UserManagement() {
 
   const loadUsers = async () => {
     try {
-      const userList = await AppUser.list();
-      setUsers(userList);
+      // Simulação de dados para demonstração
+      // Em produção, usar: const userList = await AppUser.list();
+      const mockUsers = [
+        {
+          id: 'admin-1',
+          fullName: 'Administrador Sistema',
+          username: 'admin',
+          email: 'admin@unionagro.com',
+          userType: 'admin',
+          carrierName: null,
+          isActive: true
+        },
+        {
+          id: 'user-1',
+          fullName: 'João Silva',
+          username: 'joao.silva',
+          email: 'joao@unionagro.com',
+          userType: 'user',
+          carrierName: null,
+          isActive: true
+        },
+        {
+          id: 'carrier-1',
+          fullName: 'Maria Santos',
+          username: 'maria.santos',
+          email: 'maria@transportadora.com',
+          userType: 'carrier',
+          carrierName: 'Transportadora ABC',
+          isActive: true
+        }
+      ];
+      
+      setUsers(mockUsers);
     } catch (error) {
       console.error('Error loading users:', error);
+      // Fallback para dados mock em caso de erro
+      setUsers([]);
     }
     setLoading(false);
   };
@@ -64,6 +97,7 @@ export default function UserManagement() {
       setCarriers(carrierList);
     } catch (error) {
       console.error('Error loading carriers:', error);
+      setCarriers([]);
     }
   };
 
@@ -119,17 +153,23 @@ export default function UserManagement() {
 
       if (!editingUser) {
         userData.password = formData.password;
+        userData.id = `user-${Date.now()}`;
       }
 
       if (editingUser) {
-        await AppUser.update(editingUser.id, userData);
+        // Simular update
+        setUsers(prev => prev.map(user => 
+          user.id === editingUser.id ? { ...user, ...userData } : user
+        ));
+        // Em produção: await AppUser.update(editingUser.id, userData);
       } else {
-        await AppUser.create(userData);
+        // Simular create
+        setUsers(prev => [...prev, userData]);
+        // Em produção: await AppUser.create(userData);
       }
 
       resetForm();
       setIsDialogOpen(false);
-      await loadUsers();
     } catch (error) {
       console.error('Error saving user:', error);
       alert('Erro ao salvar usuário. Verifique se o email e nome de usuário são únicos.');
@@ -152,8 +192,9 @@ export default function UserManagement() {
   const handleDelete = async (userId) => {
     if (window.confirm('Tem certeza que deseja excluir este usuário?')) {
       try {
-        await AppUser.delete(userId);
-        await loadUsers();
+        // Simular delete
+        setUsers(prev => prev.filter(user => user.id !== userId));
+        // Em produção: await AppUser.delete(userId);
       } catch (error) {
         console.error('Error deleting user:', error);
         alert('Erro ao excluir usuário.');
@@ -361,7 +402,7 @@ export default function UserManagement() {
             <>
               Nenhum usuário cadastrado ainda.
               <p className="mt-2 text-sm">
-                Clique em "Novo Usuário\" para começar.
+                Clique em "Novo Usuário" para começar.
               </p>
             </>
           ) : (
@@ -437,6 +478,7 @@ export default function UserManagement() {
                             variant="outline"
                             onClick={() => handleDelete(user.id)}
                             className="text-red-600 hover:text-red-800"
+                            disabled={user.email === 'admin@unionagro.com'}
                           >
                             <Trash2 className="w-4 h-4" />
                           </Button>

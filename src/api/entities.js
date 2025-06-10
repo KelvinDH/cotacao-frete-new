@@ -5,5 +5,5 @@ export const TruckType = base44.entities.TruckType;
 export const Carrier = base44.entities.Carrier;
 export const AppUser = base44.entities.AppUser;
 
-// auth sdk:
-export const User = base44.auth;
+// auth sdk - usando a estrutura correta do Base44
+export const Auth = base44.auth;
