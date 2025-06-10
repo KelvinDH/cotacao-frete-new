@@ -1,29 +1,20 @@
 import Layout from "./Layout.jsx";
-
 import Quote from "./Quote";
-
 import Negotiation from "./Negotiation";
-
 import Contracted from "./Contracted";
-
 import Reports from "./Reports";
-
 import ChartsPage from "./ChartsPage";
-
+import UserManagement from "./UserManagement";
+import ProtectedRoute from "@/components/ProtectedRoute";
 import { BrowserRouter as Router, Route, Routes, useLocation } from 'react-router-dom';
 
 const PAGES = {
-    
     Quote: Quote,
-    
     Negotiation: Negotiation,
-    
     Contracted: Contracted,
-    
     Reports: Reports,
-    
     ChartsPage: ChartsPage,
-    
+    UserManagement: UserManagement,
 }
 
 function _getCurrentPage(url) {
@@ -45,24 +36,23 @@ function PagesContent() {
     const currentPage = _getCurrentPage(location.pathname);
     
     return (
-        <Layout currentPageName={currentPage}>
-            <Routes>            
-                
+        <ProtectedRoute>
+            <Layout currentPageName={currentPage}>
+                <Routes>            
                     <Route path="/" element={<Quote />} />
-                
-                
-                <Route path="/Quote" element={<Quote />} />
-                
-                <Route path="/Negotiation" element={<Negotiation />} />
-                
-                <Route path="/Contracted" element={<Contracted />} />
-                
-                <Route path="/Reports" element={<Reports />} />
-                
-                <Route path="/ChartsPage" element={<ChartsPage />} />
-                
-            </Routes>
-        </Layout>
+                    <Route path="/Quote" element={<Quote />} />
+                    <Route path="/Negotiation" element={<Negotiation />} />
+                    <Route path="/Contracted" element={<Contracted />} />
+                    <Route path="/Reports" element={<Reports />} />
+                    <Route path="/ChartsPage" element={<ChartsPage />} />
+                    <Route path="/UserManagement" element={
+                        <ProtectedRoute adminOnly={true}>
+                            <UserManagement />
+                        </ProtectedRoute>
+                    } />
+                </Routes>
+            </Layout>
+        </ProtectedRoute>
     );
 }
 

@@ -1,11 +1,14 @@
-
 import React from 'react';
 import { Link } from "react-router-dom";
 import { createPageUrl } from "@/utils";
-import { Truck, FileText, HandshakeIcon, CheckCircle, BarChart } from "lucide-react";
+import { Truck, FileText, HandshakeIcon, CheckCircle, BarChart, Users, LogOut } from "lucide-react";
 import { BarChart as BarChartIconLucide } from "lucide-react";
+import { useAuth } from '@/contexts/AuthContext';
+import { Button } from '@/components/ui/button';
 
 export default function Layout({ children, currentPageName }) {
+  const { user, logout, isAdmin } = useAuth();
+
   const allNavigation = [
     { name: 'Cotação', path: 'Quote', icon: FileText },
     { name: 'Negociação', path: 'Negotiation', icon: HandshakeIcon },
@@ -13,6 +16,17 @@ export default function Layout({ children, currentPageName }) {
     { name: 'Relatórios', path: 'Reports', icon: BarChart },
     { name: 'Gráficos', path: 'ChartsPage', icon: BarChartIconLucide },
   ];
+
+  // Add admin-only pages
+  if (isAdmin) {
+    allNavigation.push({ name: 'Usuários', path: 'UserManagement', icon: Users });
+  }
+
+  const handleLogout = async () => {
+    if (window.confirm('Tem certeza que deseja sair?')) {
+      await logout();
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-green-100">
@@ -38,7 +52,7 @@ export default function Layout({ children, currentPageName }) {
         }}
       >
         <div className="absolute inset-0 bg-black bg-opacity-40"></div>
-        <div className="container mx-auto px-4 h-full flex items-center relative z-10">
+        <div className="container mx-auto px-4 h-full flex items-center justify-between relative z-10">
           <div className="flex items-center">
             <div className="bg-white p-1 rounded-full mr-4 h-16 w-16 flex items-center justify-center">
               <img 
@@ -50,6 +64,26 @@ export default function Layout({ children, currentPageName }) {
             <h1 className="text-3xl font-bold text-white">
               UnionAgro (Cotação de Frete)
             </h1>
+          </div>
+          
+          {/* User info and logout */}
+          <div className="flex items-center gap-4 text-white">
+            <div className="text-right">
+              <p className="text-sm opacity-90">Bem-vindo,</p>
+              <p className="font-semibold">{user?.email}</p>
+              {isAdmin && (
+                <span className="text-xs bg-red-500 px-2 py-1 rounded-full">Admin</span>
+              )}
+            </div>
+            <Button
+              onClick={handleLogout}
+              variant="outline"
+              size="sm"
+              className="text-white border-white hover:bg-white hover:text-gray-800"
+            >
+              <LogOut className="w-4 h-4 mr-2" />
+              Sair
+            </Button>
           </div>
         </div>
       </div>
