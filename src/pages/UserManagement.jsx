@@ -361,7 +361,7 @@ export default function UserManagement() {
             <>
               Nenhum usuário cadastrado ainda.
               <p className="mt-2 text-sm">
-                Clique em "Novo Usuário" para começar.
+                Clique em "Novo Usuário\" para começar.
               </p>
             </>
           ) : (
