@@ -1,20 +1,41 @@
 import Layout from "./Layout.jsx";
+
 import Quote from "./Quote";
+
 import Negotiation from "./Negotiation";
+
 import Contracted from "./Contracted";
+
 import Reports from "./Reports";
+
 import ChartsPage from "./ChartsPage";
-import UserManagement from "./UserManagement";
-import ProtectedRoute from "@/components/ProtectedRoute";
+
+import Users from "./Users";
+
+import TruckTypes from "./TruckTypes";
+
+import Carriers from "./Carriers";
+
 import { BrowserRouter as Router, Route, Routes, useLocation } from 'react-router-dom';
 
 const PAGES = {
+    
     Quote: Quote,
+    
     Negotiation: Negotiation,
+    
     Contracted: Contracted,
+    
     Reports: Reports,
+    
     ChartsPage: ChartsPage,
-    UserManagement: UserManagement,
+    
+    Users: Users,
+    
+    TruckTypes: TruckTypes,
+    
+    Carriers: Carriers,
+    
 }
 
 function _getCurrentPage(url) {
@@ -36,23 +57,30 @@ function PagesContent() {
     const currentPage = _getCurrentPage(location.pathname);
     
     return (
-        <ProtectedRoute>
-            <Layout currentPageName={currentPage}>
-                <Routes>            
+        <Layout currentPageName={currentPage}>
+            <Routes>            
+                
                     <Route path="/" element={<Quote />} />
-                    <Route path="/Quote" element={<Quote />} />
-                    <Route path="/Negotiation" element={<Negotiation />} />
-                    <Route path="/Contracted" element={<Contracted />} />
-                    <Route path="/Reports" element={<Reports />} />
-                    <Route path="/ChartsPage" element={<ChartsPage />} />
-                    <Route path="/UserManagement" element={
-                        <ProtectedRoute adminOnly={true}>
-                            <UserManagement />
-                        </ProtectedRoute>
-                    } />
-                </Routes>
-            </Layout>
-        </ProtectedRoute>
+                
+                
+                <Route path="/Quote" element={<Quote />} />
+                
+                <Route path="/Negotiation" element={<Negotiation />} />
+                
+                <Route path="/Contracted" element={<Contracted />} />
+                
+                <Route path="/Reports" element={<Reports />} />
+                
+                <Route path="/ChartsPage" element={<ChartsPage />} />
+                
+                <Route path="/Users" element={<Users />} />
+                
+                <Route path="/TruckTypes" element={<TruckTypes />} />
+                
+                <Route path="/Carriers" element={<Carriers />} />
+                
+            </Routes>
+        </Layout>
     );
 }
 

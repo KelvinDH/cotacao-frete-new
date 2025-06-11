@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { BarChart, TrendingDown, Percent, Package, ChevronDown, ChevronUp, MapPinned, X, DollarSign } from "lucide-react";
-import { FreightMap } from "@/api/entities";
+import { FreightMap } from "@/components/ApiDatabase";
 import { format } from "date-fns";
 
 // Lista completa de estados brasileiros com siglas

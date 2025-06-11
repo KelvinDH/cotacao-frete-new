@@ -1,8 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { CheckCircle, Calendar, Download, TrendingDown, Percent, DollarSign, Package, ChevronUp, ChevronDown, Search, FileText, MapPin, Weight, Truck as TruckIcon, Route as RouteIcon, Users, PiggyBank, CalendarDays, Info, Upload, FileCheck, Loader2 } from "lucide-react"; // Added Info icon, Upload, FileCheck, Loader2
-import { FreightMap } from "@/api/entities";
-import { UploadFile } from "@/api/integrations"; // Added UploadFile integration
+import { FreightMap, UploadFile } from "@/components/ApiDatabase";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Input } from "@/components/ui/input";

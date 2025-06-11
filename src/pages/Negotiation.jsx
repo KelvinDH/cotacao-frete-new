@@ -1,10 +1,12 @@
+
 import React, { useState, useEffect } from 'react';
-import { HandshakeIcon, Percent, CheckCircle, DollarSign, Weight, MapPin, FileText, Truck, Route, CalendarDays, Search, ChevronDown, ChevronUp, Image as ImageIcon, Info, Edit, X, Save } from "lucide-react";
-import { FreightMap } from "@/api/entities";
-import { format, isValid } from "date-fns";
+import { HandshakeIcon, Percent, CheckCircle, DollarSign, Weight, MapPin, FileText, Truck, Route, CalendarDays, Search, ChevronDown, ChevronUp, Image as ImageIcon, Info, Edit, X, Save, Plus, Trash2 } from "lucide-react";
+import { FreightMap, Carrier, User } from "@/components/ApiDatabase";
+import { format, isValid, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { 
   Popover,
   PopoverContent,
@@ -14,6 +16,7 @@ import { Calendar } from "@/components/ui/calendar";
 
 export default function NegotiationPage() {
   const [freightMaps, setFreightMaps] = useState([]);
+  const [carriers, setCarriers] = useState([]);
   const [selectedProposal, setSelectedProposal] = useState(null);
   const [finalValue, setFinalValue] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -21,46 +24,91 @@ export default function NegotiationPage() {
   const [expandedDetails, setExpandedDetails] = useState({});
   const [editingFreight, setEditingFreight] = useState(null);
   const [editedValues, setEditedValues] = useState({});
-  const [proposalInputs, setProposalInputs] = useState({});
+  const [newProposals, setNewProposals] = useState({}); // Para propostas novas sendo adicionadas
 
   useEffect(() => {
-    loadFreightMaps();
+    loadData();
   }, []);
 
-  const loadFreightMaps = async () => {
-    setLoading(true);
-    const maps = await FreightMap.filter({ status: 'negotiating' });
-    setFreightMaps(maps);
+  const loadData = async () => {
+    try {
+      const maps = await FreightMap.filter({ status: 'negotiating' });
+      const carriersList = await Carrier.list();
+      setFreightMaps(maps);
+      setCarriers(carriersList);
+    } catch (error) {
+      console.error("Error loading data:", error);
+      alert("Erro ao carregar dados. Verifique se a API está rodando.");
+    }
     setLoading(false);
   };
 
-  const handleProposalInputChange = (mapId, carrier, value) => {
-    setProposalInputs(prev => ({
+  const addNewProposalField = (freightId) => {
+    setNewProposals(prev => ({
       ...prev,
-      [mapId]: {
-        ...prev[mapId],
-        [carrier]: value
-      }
+      [freightId]: [
+        ...(prev[freightId] || []),
+        { carrierId: '', carrierName: '', proposalValue: '' }
+      ]
     }));
   };
 
-  const handleCarrierProposalChange = async (freightId, carrier) => {
-    const value = proposalInputs[freightId]?.[carrier] || 0;
-    if (value <= 0) return;
+  const removeProposalField = (freightId, index) => {
+    setNewProposals(prev => ({
+      ...prev,
+      [freightId]: prev[freightId].filter((_, i) => i !== index)
+    }));
+  };
 
-    const freight = freightMaps.find(map => map.id === freightId);
-    if (!freight) return;
+  const updateProposalField = (freightId, index, field, value) => {
+    setNewProposals(prev => ({
+      ...prev,
+      [freightId]: prev[freightId].map((proposal, i) => 
+        i === index 
+          ? { 
+              ...proposal, 
+              [field]: value,
+              ...(field === 'carrierId' && { carrierName: carriers.find(c => c.id === value)?.name || '' })
+            }
+          : proposal
+      )
+    }));
+  };
 
-    const updatedProposals = {
-      ...freight.carrierProposals,
-      [carrier]: value
-    };
+  const saveNewProposals = async (freightId) => {
+    const proposals = newProposals[freightId] || [];
+    const validProposals = proposals.filter(p => p.carrierId && p.proposalValue);
+    
+    if (validProposals.length === 0) {
+      alert('Adicione pelo menos uma proposta válida');
+      return;
+    }
 
-    await FreightMap.update(freightId, {
-      carrierProposals: updatedProposals
-    });
+    try {
+      const freight = freightMaps.find(map => map.id === freightId);
+      const updatedProposals = { ...freight.carrierProposals };
 
-    await loadFreightMaps();
+      validProposals.forEach(proposal => {
+        updatedProposals[proposal.carrierName] = parseFloat(proposal.proposalValue);
+      });
+
+      // CORREÇÃO: Enviar apenas o campo que queremos atualizar
+      await FreightMap.update(freightId, {
+        carrierProposals: updatedProposals
+      });
+
+      // Limpar campos de nova proposta
+      setNewProposals(prev => ({
+        ...prev,
+        [freightId]: []
+      }));
+
+      await loadData();
+      alert('Propostas adicionadas com sucesso!');
+    } catch (error) {
+      console.error("Error saving proposals:", error);
+      alert("Erro ao salvar propostas. Tente novamente.");
+    }
   };
 
   const startEditing = (freight) => {
@@ -80,9 +128,15 @@ export default function NegotiationPage() {
   const saveEdits = async (freightId) => {
     try {
       await FreightMap.update(freightId, editedValues);
+      
+      setFreightMaps(prevMaps => 
+        prevMaps.map(map => 
+          map.id === freightId ? { ...map, ...editedValues } : map
+        )
+      );
+      
       setEditingFreight(null);
       setEditedValues({});
-      await loadFreightMaps();
     } catch (error) {
       console.error("Error saving edits:", error);
       alert("Erro ao salvar alterações. Tente novamente.");
@@ -92,16 +146,23 @@ export default function NegotiationPage() {
   const finalizeNegotiation = async (freightId) => {
     if (!selectedProposal || finalValue <= 0) return;
 
-    await FreightMap.update(freightId, {
-      selectedCarrier: selectedProposal.carrier,
-      finalValue: finalValue,
-      status: 'contracted',
-      contractedAt: new Date().toISOString()
-    });
+    try {
+      // CORREÇÃO: Enviar apenas os campos necessários para finalizar
+      await FreightMap.update(freightId, {
+        selectedCarrier: selectedProposal.carrier,
+        finalValue: finalValue,
+        status: 'contracted',
+        contractedAt: new Date().toISOString()
+      });
 
-    setSelectedProposal(null);
-    setFinalValue(0);
-    await loadFreightMaps();
+      await loadData();
+      setSelectedProposal(null);
+      setFinalValue(0);
+      alert('Negociação finalizada com sucesso!');
+    } catch (error) {
+      console.error("Error finalizing negotiation:", error);
+      alert("Erro ao finalizar negociação. Tente novamente.");
+    }
   };
 
   const getFilteredMaps = () => {
@@ -137,301 +198,284 @@ export default function NegotiationPage() {
           Negociação de Fretes
         </h2>
         
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500 w-4 h-4" />
-          <Input
-            type="text"
-            placeholder="Pesquisar por Nº Mapa..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-9 w-full md:w-64"
-          />
+        <div className="flex items-center gap-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+            <Input
+              type="text"
+              placeholder="Buscar por número do mapa..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10 pr-4 py-2 w-64"
+            />
+          </div>
         </div>
       </div>
 
       {getFilteredMaps().length === 0 ? (
         <div className="text-center py-8 text-gray-500">
-          Nenhum mapa disponível para negociação.
+          {searchTerm ? 'Nenhum frete encontrado para esta busca.' : 'Nenhum frete em negociação.'}
         </div>
       ) : (
         <div className="space-y-6">
           {getFilteredMaps().map((map) => (
-            <div key={map.id} className="border rounded-lg p-4 md:p-6 hover:shadow-md transition-shadow bg-white">
-              <div className="flex flex-wrap items-center justify-between mb-3">
+            <div key={map.id} className="bg-white border rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-all duration-300">
+              {/* Header */}
+              <div className="bg-blue-50 p-4 border-b border-blue-200 flex justify-between items-center">
                 <div className="flex items-center">
-                  <FileText className="w-5 h-5 text-gray-600 mr-2" />
-                  <h3 className="font-semibold text-gray-800">
-                    Mapa Nº: {map.mapNumber}
-                  </h3>
-                </div>
-                
-                {editingFreight === map.id ? (
-                  <div className="flex gap-2">
-                    <Button 
-                      size="sm" 
-                      variant="outline" 
-                      onClick={cancelEditing}
-                      className="text-gray-600"
-                    >
-                      <X className="w-4 h-4 mr-1" />
-                      Cancelar
-                    </Button>
-                    <Button 
-                      size="sm" 
-                      onClick={() => saveEdits(map.id)}
-                      className="bg-green-600 hover:bg-green-700 text-white"
-                    >
-                      <Save className="w-4 h-4 mr-1" />
-                      Salvar
-                    </Button>
+                  <div className="bg-blue-100 p-2 rounded-full">
+                    <FileText className="w-5 h-5 text-blue-700" />
                   </div>
-                ) : (
-                  <Button 
-                    size="sm" 
-                    variant="outline"
-                    onClick={() => startEditing(map)}
-                    className="text-blue-600"
-                  >
-                    <Edit className="w-4 h-4 mr-1" />
-                    Editar
-                  </Button>
-                )}
-              </div>
-              
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-4 gap-y-3 mb-4">
-                <div>
-                  <label className="text-xs text-gray-500">Data Carreg.</label>
-                  {editingFreight === map.id ? (
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button 
-                          variant="outline" 
-                          className="w-full justify-start text-left font-normal"
-                        >
-                          <CalendarDays className="mr-2 h-4 w-4" />
-                          {editedValues.loadingDate ? 
-                            format(new Date(editedValues.loadingDate), "dd/MM/yy", { locale: ptBR }) : 
-                            'Selecionar data'}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0">
-                        <Calendar
-                          mode="single"
-                          selected={editedValues.loadingDate ? new Date(editedValues.loadingDate) : undefined}
-                          onSelect={(date) => setEditedValues({
-                            ...editedValues, 
-                            loadingDate: date ? date.toISOString().split('T')[0] : ''
-                          })}
-                          initialFocus
-                          locale={ptBR}
-                        />
-                      </PopoverContent>
-                    </Popover>
+                  <div className="ml-3">
+                    <h3 className="font-semibold text-gray-800">Mapa: {map.mapNumber}</h3>
+                    <p className="text-xs text-gray-500">
+                      Criado em: {format(new Date(map.created_date), 'dd/MM/yyyy')}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {map.loadingMode === 'paletizados' ? (
+                    <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
+                      Paletizados
+                    </span>
                   ) : (
-                    <p className="font-semibold text-gray-800">
-                      {map.loadingDate ? format(new Date(map.loadingDate), "dd/MM/yy", { locale: ptBR }) : 'N/A'}
+                    <span className="bg-purple-100 text-purple-800 text-xs px-2 py-1 rounded-full">
+                      BAG
+                    </span>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => toggleDetails(map.id)}
+                  >
+                    {expandedDetails[map.id] ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Basic Info */}
+              <div className="p-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                  <div>
+                    <p className="text-xs text-gray-500 flex items-center">
+                      <MapPin className="w-3 h-3 mr-1" /> Origem
+                    </p>
+                    <p className="font-medium">{map.origin}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 flex items-center">
+                      <MapPin className="w-3 h-3 mr-1" /> Destino
+                    </p>
+                    <p className="font-medium">{map.destination}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 flex items-center">
+                      <Weight className="w-3 h-3 mr-1" /> Peso
+                    </p>
+                    <p className="font-medium">{map.weight?.toLocaleString('pt-BR')} kg</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 flex items-center">
+                      <DollarSign className="w-3 h-3 mr-1" /> Valor Mapa
+                    </p>
+                    <p className="font-medium text-green-600">
+                      R$ {map.mapValue?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Carrier Proposals Section */}
+                <div className="border-t pt-4">
+                  <h4 className="font-medium text-gray-800 mb-3 flex items-center">
+                    <Percent className="w-4 h-4 mr-2" />
+                    Propostas das Transportadoras
+                  </h4>
+                  
+                  {/* New Proposal Fields */}
+                  <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+                    <div className="flex justify-between items-center mb-3">
+                      <h5 className="text-sm font-medium text-gray-700">Adicionar Novas Propostas</h5>
+                      <Button
+                        onClick={() => addNewProposalField(map.id)}
+                        size="sm"
+                        className="bg-blue-600 hover:bg-blue-700"
+                      >
+                        <Plus className="w-4 h-4 mr-1" />
+                        Adicionar
+                      </Button>
+                    </div>
+
+                    {newProposals[map.id]?.map((proposal, index) => (
+                      <div key={index} className="flex gap-2 items-end mb-2">
+                        <div className="flex-1">
+                          <label className="block text-xs text-gray-600 mb-1">Transportadora</label>
+                          <Select
+                            value={proposal.carrierId}
+                            onValueChange={(value) => updateProposalField(map.id, index, 'carrierId', value)}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Selecione..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {carriers
+                                .filter(carrier => !Object.keys(map.carrierProposals || {}).includes(carrier.name))
+                                .map((carrier) => (
+                                  <SelectItem key={carrier.id} value={carrier.id}>
+                                    {carrier.name} ({carrier.type})
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex-1">
+                          <label className="block text-xs text-gray-600 mb-1">Valor da Proposta (R$)</label>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            placeholder="0.00"
+                            value={proposal.proposalValue}
+                            onChange={(e) => updateProposalField(map.id, index, 'proposalValue', e.target.value)}
+                          />
+                        </div>
+                        <Button
+                          onClick={() => removeProposalField(map.id, index)}
+                          variant="outline"
+                          size="sm"
+                          className="text-red-600 hover:text-red-700"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    ))}
+
+                    {newProposals[map.id]?.length > 0 && (
+                      <div className="flex justify-end mt-3">
+                        <Button
+                          onClick={() => saveNewProposals(map.id)}
+                          className="bg-green-600 hover:bg-green-700"
+                          size="sm"
+                        >
+                          Salvar Propostas
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Existing Proposals */}
+                  {map.carrierProposals && Object.keys(map.carrierProposals).length > 0 ? (
+                    <div className="space-y-2">
+                      {Object.entries(map.carrierProposals).map(([carrier, value]) => (
+                        <div key={carrier} className="flex justify-between items-center p-3 border rounded-lg">
+                          <div>
+                            <p className="font-medium">{carrier}</p>
+                            <p className="text-sm text-gray-600">Proposta de frete</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-lg font-bold text-green-600">
+                              R$ {value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {((value / map.mapValue) * 100 - 100).toFixed(1)}% do valor mapa
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-gray-500 text-center py-4">
+                      Nenhuma proposta recebida ainda
                     </p>
                   )}
                 </div>
-                <div>
-                  <label className="text-xs text-gray-500">Origem</label>
-                  <p className="font-semibold text-gray-800 truncate" title={map.origin}>{map.origin}</p>
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500">Destino</label>
-                  <p className="font-semibold text-gray-800 truncate" title={map.destination}>{map.destination}</p>
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500">Peso (kg)</label>
-                  {editingFreight === map.id ? (
-                    <Input
-                      type="number"
-                      min="0"
-                      value={editedValues.weight || ''}
-                      onChange={e => setEditedValues({...editedValues, weight: parseFloat(e.target.value) || 0})}
-                      className="h-9 text-sm"
-                    />
-                  ) : (
-                    <p className="font-semibold text-gray-800">{map.weight}</p>
-                  )}
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500">Valor Mapa (R$)</label>
-                  {editingFreight === map.id ? (
-                    <Input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={editedValues.mapValue || ''}
-                      onChange={e => setEditedValues({...editedValues, mapValue: parseFloat(e.target.value) || 0})}
-                      className="h-9 text-sm"
-                    />
-                  ) : (
-                    <p className="font-semibold text-gray-800">{map.mapValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
-                  )}
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500">Caminhão</label>
-                  <p className="font-semibold text-gray-800 truncate" title={map.truckType}>{map.truckType}</p>
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500">KM Total</label>
-                  <p className="font-semibold text-gray-800">{map.totalKm}</p>
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500">Modalidade</label>
-                  <p className="font-semibold text-gray-800">
-                    {map.loadingMode === 'paletizados' ? 'Paletizados' : 'BAG'}
-                  </p>
-                </div>
-              </div>
 
-              {(map.routeInfo || map.mapImage) && (
-                <div className="mb-4">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => toggleDetails(map.id)}
-                    className="w-full flex items-center justify-between text-gray-600 hover:text-gray-800"
-                  >
-                    <span className="flex items-center">
-                      <Info className="w-4 h-4 mr-2" />
-                      Detalhes Adicionais (Roteiro/Mapa)
-                    </span>
-                    {expandedDetails[map.id] ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                  </Button>
-                  {expandedDetails[map.id] && (
-                    <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4 p-3 border rounded-md bg-gray-50">
-                      {map.routeInfo && (
-                        <div>
-                          <label className="text-sm text-gray-600 mb-1 block font-medium">Roteiro</label>
-                          <p className="bg-white p-3 rounded-md text-gray-700 whitespace-pre-line text-sm border max-h-32 overflow-y-auto">
-                            {map.routeInfo}
-                          </p>
-                        </div>
-                      )}
-                      {map.mapImage && (
-                        <div>
-                          <label className="text-sm text-gray-600 mb-1 block font-medium">Mapa</label>
-                          <a href={map.mapImage} target="_blank" rel="noopener noreferrer" className="block">
-                            <img
-                              src={map.mapImage}
-                              alt="Mapa do frete"
-                              className="max-h-48 w-full object-contain rounded-md border hover:opacity-80 transition-opacity"
-                            />
-                          </a>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-              
-              <div className="mt-4 border-t pt-4">
-                <h4 className="text-sm font-semibold text-gray-700 mb-3">Registrar / Ver Propostas</h4>
-                <div className="space-y-3">
-                    {Object.keys(map.carrierProposals).map(carrier => (
-                      <div key={carrier} className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 p-3 bg-gray-50 rounded-lg">
-                        <span className="font-medium text-gray-800 text-sm w-full sm:w-1/3">{carrier}</span>
-                        <div className="flex items-center gap-2 w-full sm:w-2/3">
-                          <Input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            placeholder="R$ 0,00"
-                            className="flex-1 px-3 py-2 text-sm border-gray-300 rounded-md"
-                            value={proposalInputs[map.id]?.[carrier] || map.carrierProposals[carrier] || ''}
-                            onChange={(e) => handleProposalInputChange(map.id, carrier, parseFloat(e.target.value) || 0)}
-                          />
-                          <Button 
-                            size="sm"
-                            onClick={() => handleCarrierProposalChange(map.id, carrier)}
-                            className="bg-green-600 hover:bg-green-700 text-white"
-                          >
-                            Salvar
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              </div>
-
-              <div className="mt-4 border-t pt-4">
-                  <h4 className="text-sm font-semibold text-gray-700 mb-3">Selecionar Proposta para Fechamento</h4>
-                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {Object.entries(map.carrierProposals).filter(([_, proposalValue]) => proposalValue > 0).map(([carrier, proposalValue]) => (
-                      <div key={carrier} className="relative">
-                        <div 
-                          className={`border rounded-lg p-3 cursor-pointer transition-all duration-150 ${
-                            selectedProposal?.freightId === map.id && selectedProposal?.carrier === carrier
-                              ? 'border-blue-500 bg-blue-50 shadow-md scale-105'
-                              : 'hover:border-gray-400 hover:bg-gray-50'
-                          }`}
-                          onClick={() => setSelectedProposal({ freightId: map.id, carrier })}
+                {/* Contract Section */}
+                {map.carrierProposals && Object.keys(map.carrierProposals).length > 0 && (
+                  <div className="border-t pt-4 mt-4">
+                    <h4 className="font-medium text-gray-800 mb-3 flex items-center">
+                      <CheckCircle className="w-4 h-4 mr-2" />
+                      Fechar Contrato
+                    </h4>
+                    <div className="flex gap-2 items-end">
+                      <div className="flex-1">
+                        <label className="block text-xs text-gray-600 mb-1">Transportadora Selecionada</label>
+                        <select
+                          className="w-full px-3 py-2 border rounded-md"
+                          value={selectedProposal?.carrier || ''}
+                          onChange={(e) => {
+                            const carrier = e.target.value;
+                            const value = map.carrierProposals[carrier];
+                            setSelectedProposal({ carrier, value });
+                            setFinalValue(value);
+                          }}
                         >
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs font-medium text-gray-700">{carrier}</span>
-                          </div>
-                          <div className="bg-white px-2 py-1 rounded-md border border-gray-200">
-                            <span className="font-medium text-sm text-gray-800">
-                              R$ {proposalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                            </span>
-                          </div>
-                        </div>
+                          <option value="">Selecione uma transportadora</option>
+                          {Object.entries(map.carrierProposals).map(([carrier, value]) => (
+                            <option key={carrier} value={carrier}>
+                              {carrier} - R$ {value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </option>
+                          ))}
+                        </select>
                       </div>
-                    ))}
-                  </div>
-                   {Object.values(map.carrierProposals).every(val => val <= 0) && (
-                      <p className="text-sm text-gray-500">Nenhuma proposta registrada para selecionar.</p>
-                   )}
-              </div>
-
-              {selectedProposal?.freightId === map.id && (
-                <div className="mt-6 p-4 border-t border-dashed bg-green-50 rounded-b-lg">
-                  <h3 className="text-md font-semibold mb-3 text-green-700">Finalizar Negociação para Mapa {map.mapNumber}</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">
-                        Transportadora Selecionada
-                      </label>
-                      <p className="text-md font-semibold text-blue-600">
-                        {selectedProposal.carrier}
-                      </p>
-                      <p className="text-xs text-gray-600 mt-1">
-                        Proposta Original: R$ {map.carrierProposals[selectedProposal.carrier].toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </p>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">
-                        Valor Final do Frete (R$)
-                      </label>
-                      <div className="flex items-center gap-2">
+                      <div className="flex-1">
+                        <label className="block text-xs text-gray-600 mb-1">Valor Final (R$)</label>
                         <Input
                           type="number"
-                          min="0"
                           step="0.01"
-                          placeholder="Valor final"
-                          className="flex-1 px-3 py-2 text-sm border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          value={finalValue || ''}
-                          onChange={(e) => setFinalValue(parseFloat(e.target.value) || 0)}
+                          value={finalValue}
+                          onChange={(e) => setFinalValue(parseFloat(e.target.value))}
                         />
-                        <Button
-                          size="sm"
-                          onClick={() => finalizeNegotiation(map.id)}
-                          disabled={finalValue <= 0}
-                          className={`px-3 py-2 transition-colors duration-200 ${
-                            finalValue <= 0
-                              ? 'bg-gray-400 cursor-not-allowed'
-                              : 'bg-green-600 hover:bg-green-700 text-white'
-                          }`}
-                        >
-                          <CheckCircle className="w-4 h-4" />
-                        </Button>
                       </div>
+                      <Button
+                        onClick={() => finalizeNegotiation(map.id)}
+                        disabled={!selectedProposal || finalValue <= 0}
+                        className="bg-green-600 hover:bg-green-700"
+                      >
+                        <CheckCircle className="w-4 h-4 mr-2" />
+                        Fechar Contrato
+                      </Button>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
+
+                {/* Expanded Details */}
+                {expandedDetails[map.id] && (
+                  <div className="border-t pt-4 mt-4">
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                      <div>
+                        <p className="text-xs text-gray-500 flex items-center">
+                          <Route className="w-3 h-3 mr-1" /> Distância
+                        </p>
+                        <p className="font-medium">{map.totalKm} km</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 flex items-center">
+                          <Truck className="w-3 h-3 mr-1" /> Tipo de Caminhão
+                        </p>
+                        <p className="font-medium">{map.truckType}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 flex items-center">
+                          <CalendarDays className="w-3 h-3 mr-1" /> Data Carregamento
+                        </p>
+                        <p className="font-medium">
+                          {map.loadingDate ? format(parseISO(map.loadingDate), "dd/MM/yyyy", { locale: ptBR }) : 'N/A'}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    {map.routeInfo && (
+                      <div className="mt-4">
+                        <p className="text-xs text-gray-500 flex items-center mb-2">
+                          <Info className="w-3 h-3 mr-1" /> Informações da Rota
+                        </p>
+                        <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-lg">
+                          {map.routeInfo}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           ))}
         </div>

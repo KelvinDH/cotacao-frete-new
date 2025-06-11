@@ -1,13 +1,13 @@
 
 import React, { useState, useEffect } from 'react';
-import { FreightMap } from "@/api/entities";
+import { FreightMap } from "@/components/ApiDatabase"; // Changed from LocalDatabase to ApiDatabase
 import { BarChart as BarChartIcon, PieChart as PieChartIcon, TrendingUp, Loader2, DollarSign, Map, Truck, TrendingDown as SavingsIcon, Percent } from 'lucide-react'; // Added more icons
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   PieChart, Pie, Cell, Sector
 } from 'recharts';
-import { format, parseISO } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
+import { format, parseISO } from 'date-fns'; // Corrected import syntax
+import { ptBR } from 'date-fns/locale'; // Corrected import syntax
 
 // Helper to get destination state
 const statesList = ['SP', 'MS', 'MT', 'GO', 'TO', 'MG', 'RS', 'PE', 'PI', 'RR', 'PR', 'PA', 'BA', 'RO', 'MA'];
@@ -93,11 +93,13 @@ export default function ChartsPage() {
   const loadChartData = async () => {
     setLoading(true);
     try {
+      // Data is loaded from the API database using FreightMap
       const maps = await FreightMap.filter({ status: 'contracted' });
       setFreightData(maps);
       processDataForCharts(maps);
     } catch (error) {
       console.error("Error loading freight data for charts:", error);
+      alert("Erro ao carregar dados para gráficos. Verifique se a API está rodando.");
     }
     setLoading(false);
   };

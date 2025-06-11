@@ -1,450 +1,498 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from "react-router-dom";
-import { createPageUrl } from "@/utils";
-import { Package, FileText, MapPin, Weight, DollarSign, Truck, Route, Upload, Image as ImageIcon, Loader2, ChevronRight, Calendar as CalendarIcon, CalendarDays } from "lucide-react";
-import { FreightMap, TruckType, Carrier } from "@/api/entities";
-import { UploadFile } from "@/api/integrations";
-import { Badge } from '@/components/ui/badge';
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Calendar } from "@/components/ui/calendar";
+import { FileText, Plus, MapPin, Weight, DollarSign, Calendar, Truck, Route, Upload, Image as ImageIcon, X, Eye } from "lucide-react";
+import { FreightMap, TruckType, Carrier, UploadFile } from "@/components/ApiDatabase";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { format, isValid } from "date-fns";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { 
+  Popover,
+  PopoverContent,
+  PopoverTrigger
+} from "@/components/ui/popover";
+import { Calendar as CalendarComponent } from "@/components/ui/calendar";
+import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 export default function QuotePage() {
-  const navigate = useNavigate();
-  const [uploading, setUploading] = useState(false);
-  const [allTruckTypes, setAllTruckTypes] = useState([]);
-  const [carriers, setCarriers] = useState([]);
-  const [showCarrierSelection, setShowCarrierSelection] = useState(false);
-  const [selectedCarriers, setSelectedCarriers] = useState([]);
-  const [quote, setQuote] = useState({
+  const [formData, setFormData] = useState({
     mapNumber: '',
-    mapImage: '',
-    origin: 'Pederneiras/SP',
+    origin: '',
     destination: '',
-    totalKm: 0,
-    weight: 0,
-    mapValue: 0,
+    totalKm: '',
+    weight: '',
+    mapValue: '',
     truckType: '',
-    value: 0,
-    loadingMode: 'paletizados',
+    selectedCarrier: '',
+    loadingMode: '',
+    loadingDate: null,
     routeInfo: '',
-    loadingDate: new Date().toISOString().split('T')[0]
+    mapImage: ''
   });
 
+  const [truckTypes, setTruckTypes] = useState([]);
+  const [carriers, setCarriers] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [imagePreview, setImagePreview] = useState(null);
+  const [showImageModal, setShowImageModal] = useState(false);
+
   useEffect(() => {
-    loadTruckTypes();
-    loadCarriers();
+    loadTruckTypesAndCarriers();
   }, []);
 
-  const loadTruckTypes = async () => {
-    const types = await TruckType.list();
-    setAllTruckTypes(types);
-    
-    if (types.length > 0) {
-      const validTypes = types.filter(t => t.modality === 'paletizados');
-      if (validTypes.length > 0) {
-        setQuote(prev => ({ ...prev, truckType: validTypes[0].name }));
-      }
+  const loadTruckTypesAndCarriers = async () => {
+    try {
+      const trucks = await TruckType.list();
+      const carriersList = await Carrier.list();
+      setTruckTypes(trucks);
+      setCarriers(carriersList);
+    } catch (error) {
+      console.error("Error loading data:", error);
+      alert("Erro ao carregar dados. Verifique se a API está rodando.");
     }
   };
 
-  const getFilteredTruckTypes = () => {
-    return allTruckTypes.filter(truck => truck.modality === quote.loadingMode);
-  };
-
-  const handleLoadingModeChange = (mode) => {
-    const filteredTrucks = allTruckTypes.filter(t => t.modality === mode);
-    setQuote(prev => ({
+  const handleInputChange = (field, value) => {
+    setFormData(prev => ({
       ...prev,
-      loadingMode: mode,
-      truckType: filteredTrucks.length > 0 ? filteredTrucks[0].name : ''
+      [field]: value
     }));
   };
 
-  const loadCarriers = async () => {
-    const allCarriers = await Carrier.list();
-    setCarriers(allCarriers);
-    // By default, select all carriers
-    setSelectedCarriers(allCarriers.map(c => c.name));
-  };
-
-  const handleImageUpload = async (e) => {
-    const file = e.target.files?.[0];
+  const handleImageUpload = async (event) => {
+    const file = event.target.files[0];
     if (!file) return;
 
-    if (!file.type.startsWith('image/')) {
-      alert('Por favor, selecione apenas arquivos de imagem.');
+    // Criar preview local da imagem
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setImagePreview(e.target.result);
+    };
+    reader.readAsDataURL(file);
+
+    setUploadingImage(true);
+    try {
+      const { file_url } = await UploadFile({ file });
+      setFormData(prev => ({
+        ...prev,
+        mapImage: file_url
+      }));
+    } catch (error) {
+      console.error("Error uploading image:", error);
+      alert("Erro ao fazer upload da imagem. Verifique se a API está rodando.");
+      setImagePreview(null);
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const removeImage = () => {
+    setFormData(prev => ({
+      ...prev,
+      mapImage: ''
+    }));
+    setImagePreview(null);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!formData.mapNumber || !formData.origin || !formData.destination || !formData.totalKm || !formData.weight || !formData.mapValue || !formData.truckType || !formData.selectedCarrier || !formData.loadingMode || !formData.loadingDate) {
+      alert("Por favor, preencha todos os campos obrigatórios");
       return;
     }
 
-    setUploading(true);
+    setLoading(true);
     try {
-      const { file_url } = await UploadFile({ file });
-      setQuote(prev => ({ ...prev, mapImage: file_url }));
-    } catch (error) {
-      console.error('Erro ao fazer upload da imagem:', error);
-      alert('Erro ao fazer upload da imagem. Tente novamente.');
-    }
-    setUploading(false);
-  };
+      const freightData = {
+        ...formData,
+        totalKm: parseInt(formData.totalKm),
+        weight: parseFloat(formData.weight),
+        mapValue: parseFloat(formData.mapValue),
+        loadingDate: formData.loadingDate ? format(formData.loadingDate, 'yyyy-MM-dd') : '',
+        carrierProposals: {},
+        status: 'negotiating',
+        invoiceUrls: []
+      };
 
-  const saveFreight = async (e) => {
-    e.preventDefault();
-    
-    const carrierProposals = {};
-    selectedCarriers.forEach(carrier => {
-      if (carrier) {
-        carrierProposals[carrier] = 0;
-      }
-    });
-    
-    await FreightMap.create({
-      ...quote,
-      carrierProposals,
-      status: 'negotiating'
-    });
-    
-    navigate(createPageUrl("Negotiation"));
+      await FreightMap.create(freightData);
+      
+      alert("Cotação criada com sucesso!");
+      
+      // Reset form
+      setFormData({
+        mapNumber: '',
+        origin: '',
+        destination: '',
+        totalKm: '',
+        weight: '',
+        mapValue: '',
+        truckType: '',
+        selectedCarrier: '',
+        loadingMode: '',
+        loadingDate: null,
+        routeInfo: '',
+        mapImage: ''
+      });
+      setImagePreview(null);
+    } catch (error) {
+      console.error("Error creating freight map:", error);
+      alert("Erro ao criar cotação. Verifique se a API está rodando.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <div className="max-w-4xl mx-auto p-6">
-      <form onSubmit={saveFreight} className="space-y-6">
-        <div>
-          <label className="flex items-center text-gray-700 font-medium mb-2">
-            <Package className="w-4 h-4 mr-2 text-green-600" />
-            Modalidade de Carregamento
-          </label>
-          <div className="grid grid-cols-2 gap-4">
-            <button
-              type="button"
-              className={`p-4 rounded-lg border-2 transition-colors duration-200 flex flex-col items-center gap-2 ${
-                quote.loadingMode === 'paletizados'
-                  ? 'border-green-500 bg-green-50 text-green-700'
-                  : 'border-gray-200 hover:border-gray-300 text-gray-600'
-              }`}
-              onClick={() => handleLoadingModeChange('paletizados')}
-            >
-              <Package className="w-6 h-6" />
-              <span className="font-medium">Paletizados</span>
-            </button>
-            <button
-              type="button"
-              className={`p-4 rounded-lg border-2 transition-colors duration-200 flex flex-col items-center gap-2 ${
-                quote.loadingMode === 'bag'
-                  ? 'border-green-500 bg-green-50 text-green-700'
-                  : 'border-gray-200 hover:border-gray-300 text-gray-600'
-              }`}
-              onClick={() => handleLoadingModeChange('bag')}
-            >
-              <Package className="w-6 h-6" />
-              <span className="font-medium">BAG</span>
-            </button>
-          </div>
+    <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50 p-6">
+      <div className="max-w-6xl mx-auto">
+        <div className="text-center mb-8">
+          <h2 className="text-3xl font-bold text-gray-800 flex items-center justify-center mb-2">
+            <FileText className="w-8 h-8 mr-3 text-green-600" />
+            Nova Cotação de Frete
+          </h2>
+          <p className="text-gray-600">Preencha as informações para criar uma nova cotação</p>
         </div>
 
-        <div>
-          <label className="flex items-center text-gray-700 font-medium mb-2">
-            <ImageIcon className="w-4 h-4 mr-2 text-green-600" />
-            Mapa
-          </label>
-          <div className="mt-2">
-            {quote.mapImage ? (
-              <div className="relative">
-                <img
-                  src={quote.mapImage}
-                  alt="Mapa carregado"
-                  className="w-full max-h-64 object-contain rounded-lg border"
-                />
-                <button
-                  type="button"
-                  onClick={() => setQuote(prev => ({ ...prev, mapImage: '' }))}
-                  className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-full hover:bg-red-600 transition-colors"
-                >
-                  <Upload className="w-4 h-4" />
-                </button>
-              </div>
-            ) : (
-              <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleImageUpload}
-                  className="hidden"
-                  id="map-image"
-                />
-                <label
-                  htmlFor="map-image"
-                  className="cursor-pointer flex flex-col items-center justify-center space-y-2"
-                >
-                  {uploading ? (
-                    <>
-                      <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
-                      <span className="text-sm text-gray-500">Carregando imagem...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="w-8 h-8 text-gray-400" />
-                      <span className="text-sm text-gray-500">Clique para fazer upload da imagem do mapa</span>
-                    </>
-                  )}
+        <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-xl p-8 space-y-8">
+          {/* Seção 1: Identificação e Imagem */}
+          <div className="border-b border-gray-200 pb-6">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+              <FileText className="w-5 h-5 mr-2 text-green-600" />
+              Identificação do Mapa
+            </h3>
+            
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Número do Mapa *
                 </label>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="flex items-center text-gray-700 font-medium mb-2">
-              <FileText className="w-4 h-4 mr-2 text-green-600" />
-              Nº Mapa
-            </label>
-            <input
-              type="text"
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              value={quote.mapNumber}
-              onChange={(e) => setQuote({...quote, mapNumber: e.target.value})}
-              required
-            />
-          </div>
-          <div>
-            <label className="flex items-center text-gray-700 font-medium mb-2">
-              <CalendarDays className="w-4 h-4 mr-2 text-green-600" />
-              Data de Carregamento
-            </label>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant={"outline"}
-                  className={`w-full justify-start text-left font-normal ${
-                    !quote.loadingDate && "text-muted-foreground"
-                  }`}
-                >
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {quote.loadingDate && isValid(new Date(quote.loadingDate))
-                    ? format(new Date(quote.loadingDate), "PPP", { locale: ptBR })
-                    : <span>Escolha uma data</span>}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0">
-                <Calendar
-                  mode="single"
-                  selected={quote.loadingDate ? new Date(quote.loadingDate) : undefined}
-                  onSelect={(date) => setQuote({...quote, loadingDate: date ? date.toISOString().split('T')[0] : ''})}
-                  initialFocus
-                  locale={ptBR}
+                <Input
+                  type="text"
+                  value={formData.mapNumber}
+                  onChange={(e) => handleInputChange('mapNumber', e.target.value)}
+                  placeholder="Ex: MAP001"
+                  className="text-lg"
+                  required
                 />
-              </PopoverContent>
-            </Popover>
-          </div>
-        </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="flex items-center text-gray-700 font-medium mb-2">
-              <MapPin className="w-4 h-4 mr-2 text-green-600" />
-              Origem
-            </label>
-            <input
-              type="text"
-              className="w-full px-4 py-2 border border-gray-300 rounded-md bg-gray-100 cursor-not-allowed"
-              value={quote.origin}
-              disabled
-            />
-          </div>
-
-          <div>
-            <label className="flex items-center text-gray-700 font-medium mb-2">
-              <MapPin className="w-4 h-4 mr-2 text-green-600" />
-              Destino
-            </label>
-            <input
-              type="text"
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              value={quote.destination}
-              onChange={(e) => setQuote({...quote, destination: e.target.value})}
-              required
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="flex items-center text-gray-700 font-medium mb-2">
-              <Route className="w-4 h-4 mr-2 text-green-600" />
-              KM Total
-            </label>
-            <input
-              type="number"
-              min="0"
-              step="1"
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              value={quote.totalKm || ''}
-              onChange={(e) => setQuote({...quote, totalKm: parseInt(e.target.value) || 0})}
-              required
-            />
-          </div>
-
-          <div>
-            <label className="flex items-center text-gray-700 font-medium mb-2">
-              <Weight className="w-4 h-4 mr-2 text-green-600" />
-              Peso (kg)
-            </label>
-            <input
-              type="number"
-              min="0"
-              step="0.1"
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              value={quote.weight || ''}
-              onChange={(e) => setQuote({...quote, weight: parseFloat(e.target.value)})}
-              required
-            />
-          </div>
-        </div>
-
-        <div>
-          <label className="flex items-center text-gray-700 font-medium mb-2">
-            <DollarSign className="w-4 h-4 mr-2 text-green-600" />
-            Valor Mapa (R$)
-          </label>
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            value={quote.mapValue || ''}
-            onChange={(e) => setQuote({...quote, mapValue: parseFloat(e.target.value)})}
-            required
-          />
-        </div>
-
-        <div>
-          <label className="flex items-center text-gray-700 font-medium mb-2">
-            <Truck className="w-4 h-4 mr-2 text-green-600" />
-            Tipo de Caminhão
-          </label>
-          <select
-            className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-transparent"
-            value={quote.truckType}
-            onChange={(e) => setQuote({...quote, truckType: e.target.value})}
-            required
-          >
-            <option value="">Selecione um tipo de caminhão</option>
-            {getFilteredTruckTypes().map((truck) => (
-              <option key={truck.id} value={truck.name}>
-                {truck.name} ({truck.capacity} toneladas)
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <button
-            type="button"
-            onClick={() => setShowCarrierSelection(!showCarrierSelection)}
-            className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
-          >
-            <ChevronRight className={`w-4 h-4 transition-transform ${showCarrierSelection ? 'rotate-90' : ''}`} />
-            <span className="font-medium">Selecionar Transportadoras</span>
-            <span className="text-sm text-gray-500">
-              ({selectedCarriers.filter(Boolean).length} selecionadas)
-            </span>
-          </button>
-
-          {showCarrierSelection && (
-            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-              <div className="flex justify-between items-center mb-4">
-                <span className="text-sm text-gray-600">
-                  Escolha as transportadoras para enviar a cotação
-                </span>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedCarriers(carriers.map(c => c.name))}
-                    className="text-sm text-blue-600 hover:text-blue-800"
-                  >
-                    Selecionar Todas
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedCarriers([])}
-                    className="text-sm text-gray-600 hover:text-gray-800"
-                  >
-                    Limpar
-                  </button>
-                </div>
               </div>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {carriers.map((carrier) => {
-                  const carrierName = carrier.name;
-                  if (!carrierName) return null;
-                  
-                  return (
-                    <label
-                      key={carrier.id}
-                      className="flex items-center gap-2 p-3 bg-white rounded-lg border cursor-pointer hover:bg-gray-50"
+              {/* Upload de Imagem com Preview */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Imagem do Mapa
+                </label>
+                
+                {!imagePreview && !formData.mapImage ? (
+                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-green-400 transition-colors">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleImageUpload}
+                      disabled={uploadingImage}
+                      className="hidden"
+                      id="image-upload"
+                    />
+                    <label 
+                      htmlFor="image-upload" 
+                      className="cursor-pointer flex flex-col items-center"
                     >
-                      <input
-                        type="checkbox"
-                        checked={selectedCarriers.includes(carrierName)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedCarriers([...selectedCarriers, carrierName]);
-                          } else {
-                            setSelectedCarriers(selectedCarriers.filter(c => c !== carrierName));
-                          }
-                        }}
-                        className="rounded border-gray-300 text-green-600 focus:ring-green-500"
-                      />
-                      <span className="flex-1 text-gray-700">{carrierName}</span>
-                      <Badge className={carrier.type === 'paletizados' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}>
-                        {carrier.type === 'paletizados' ? 'Paletizados' : 'BAG'}
-                      </Badge>
+                      {uploadingImage ? (
+                        <div className="flex items-center text-green-600">
+                          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-600 mr-2"></div>
+                          Carregando...
+                        </div>
+                      ) : (
+                        <>
+                          <Upload className="w-8 h-8 text-gray-400 mb-2" />
+                          <span className="text-sm text-gray-600">Clique para fazer upload</span>
+                          <span className="text-xs text-gray-400 mt-1">PNG, JPG até 10MB</span>
+                        </>
+                      )}
                     </label>
-                  );
-                })}
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <div className="border rounded-lg p-4 bg-gray-50">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-sm font-medium text-green-700 flex items-center">
+                          <ImageIcon className="w-4 h-4 mr-2" />
+                          Imagem do Mapa
+                        </span>
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setShowImageModal(true)}
+                          >
+                            <Eye className="w-4 h-4 mr-1" />
+                            Visualizar
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={removeImage}
+                            className="text-red-600 hover:text-red-700"
+                          >
+                            <X className="w-4 h-4 mr-1" />
+                            Remover
+                          </Button>
+                        </div>
+                      </div>
+                      
+                      <div className="w-full h-32 bg-white rounded border overflow-hidden">
+                        <img 
+                          src={imagePreview || formData.mapImage} 
+                          alt="Preview do mapa" 
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Seção 2: Rota */}
+          <div className="border-b border-gray-200 pb-6">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+              <MapPin className="w-5 h-5 mr-2 text-blue-600" />
+              Informações da Rota
+            </h3>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
+                  <MapPin className="w-4 h-4 mr-1 text-green-600" />
+                  Origem *
+                </label>
+                <Input
+                  type="text"
+                  value={formData.origin}
+                  onChange={(e) => handleInputChange('origin', e.target.value)}
+                  placeholder="Ex: São Paulo/SP"
+                  required
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
+                  <MapPin className="w-4 h-4 mr-1 text-red-600" />
+                  Destino *
+                </label>
+                <Input
+                  type="text"
+                  value={formData.destination}
+                  onChange={(e) => handleInputChange('destination', e.target.value)}
+                  placeholder="Ex: Rio de Janeiro/RJ"
+                  required
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
+                  <Route className="w-4 h-4 mr-1 text-purple-600" />
+                  Distância Total (km) *
+                </label>
+                <Input
+                  type="number"
+                  value={formData.totalKm}
+                  onChange={(e) => handleInputChange('totalKm', e.target.value)}
+                  placeholder="Ex: 450"
+                  required
+                />
+              </div>
+            </div>
+            
+            <div className="mt-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Informações Adicionais da Rota
+              </label>
+              <Textarea
+                value={formData.routeInfo}
+                onChange={(e) => handleInputChange('routeInfo', e.target.value)}
+                placeholder="Descreva informações adicionais sobre a rota, pedágios, restrições, etc..."
+                rows={3}
+                className="resize-none"
+              />
+            </div>
+          </div>
+
+          {/* Seção 3: Carga e Valores */}
+          <div className="border-b border-gray-200 pb-6">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+              <Weight className="w-5 h-5 mr-2 text-orange-600" />
+              Informações da Carga
+            </h3>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
+                  <Weight className="w-4 h-4 mr-1 text-orange-600" />
+                  Peso (kg) *
+                </label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={formData.weight}
+                  onChange={(e) => handleInputChange('weight', e.target.value)}
+                  placeholder="Ex: 15000"
+                  required
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
+                  <DollarSign className="w-4 h-4 mr-1 text-green-600" />
+                  Valor do Mapa (R$) *
+                </label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={formData.mapValue}
+                  onChange={(e) => handleInputChange('mapValue', e.target.value)}
+                  placeholder="Ex: 2500.00"
+                  required
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
+                  <Calendar className="w-4 h-4 mr-1 text-blue-600" />
+                  Data de Carregamento *
+                </label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full justify-start text-left">
+                      {formData.loadingDate ? format(formData.loadingDate, 'dd/MM/yyyy', { locale: ptBR }) : 'Selecione a data'}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <CalendarComponent
+                      mode="single"
+                      selected={formData.loadingDate}
+                      onSelect={(date) => handleInputChange('loadingDate', date)}
+                      locale={ptBR}
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </div>
+          </div>
+
+          {/* Seção 4: Especificações */}
+          <div className="pb-6">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+              <Truck className="w-5 h-5 mr-2 text-indigo-600" />
+              Especificações do Transporte
+            </h3>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
+                  <Truck className="w-4 h-4 mr-1 text-indigo-600" />
+                  Tipo de Caminhão *
+                </label>
+                <Select value={formData.truckType} onValueChange={(value) => handleInputChange('truckType', value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione o tipo de caminhão" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {truckTypes.map((truck) => (
+                      <SelectItem key={truck.id} value={truck.name}>
+                        {truck.name} ({truck.capacity}t - R${truck.baseRate}/km)
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
-              {selectedCarriers.length === 0 && (
-                <p className="text-sm text-red-600 mt-2">
-                  Selecione pelo menos uma transportadora
-                </p>
-              )}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Transportadora *
+                </label>
+                <Select value={formData.selectedCarrier} onValueChange={(value) => handleInputChange('selectedCarrier', value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione a transportadora" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {carriers.map((carrier) => (
+                      <SelectItem key={carrier.id} value={carrier.name}>
+                        {carrier.name} ({carrier.type})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Modalidade de Carregamento *
+                </label>
+                <Select value={formData.loadingMode} onValueChange={(value) => handleInputChange('loadingMode', value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione a modalidade" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="paletizados">Paletizados</SelectItem>
+                    <SelectItem value="bag">BAG</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-          )}
-        </div>
+          </div>
 
-        <div>
-          <label className="flex items-center text-gray-700 font-medium mb-2">
-            <Route className="w-4 h-4 mr-2 text-green-600" />
-            Roteiro
-          </label>
-          <textarea
-            className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            value={quote.routeInfo}
-            onChange={(e) => setQuote({...quote, routeInfo: e.target.value})}
-            rows={3}
-            placeholder="Informações sobre o trajeto, pontos de referência, observações..."
-          />
-        </div>
+          {/* Submit Button */}
+          <div className="flex justify-end pt-6 border-t border-gray-200">
+            <Button 
+              type="submit" 
+              disabled={loading}
+              className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 text-lg"
+            >
+              {loading ? (
+                <div className="flex items-center">
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
+                  Criando Cotação...
+                </div>
+              ) : (
+                <div className="flex items-center">
+                  <Plus className="w-5 h-5 mr-2" />
+                  Criar Cotação
+                </div>
+              )}
+            </Button>
+          </div>
+        </form>
 
-        <button
-          type="submit"
-          disabled={selectedCarriers.length === 0}
-          className={`w-full py-3 px-6 rounded-md flex items-center justify-center ${
-            selectedCarriers.length === 0
-              ? 'bg-gray-400 cursor-not-allowed'
-              : 'bg-green-600 hover:bg-green-700 transition-colors duration-200'
-          } text-white`}
-        >
-          <Truck className="w-5 h-5 mr-2" />
-          Salvar Frete
-        </button>
-      </form>
+        {/* Modal para visualizar imagem */}
+        {showImageModal && (imagePreview || formData.mapImage) && (
+          <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg max-w-4xl max-h-[90vh] overflow-hidden">
+              <div className="flex justify-between items-center p-4 border-b">
+                <h3 className="text-lg font-semibold">Visualizar Imagem do Mapa</h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowImageModal(false)}
+                >
+                  <X className="w-5 h-5" />
+                </Button>
+              </div>
+              <div className="p-4">
+                <img 
+                  src={imagePreview || formData.mapImage} 
+                  alt="Imagem do mapa" 
+                  className="max-w-full max-h-[70vh] object-contain mx-auto"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
