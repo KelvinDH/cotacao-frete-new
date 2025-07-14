@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Truck, Plus, Edit, Trash2, Search, Package, DollarSign, Weight, AlertCircle, CheckCircle } from 'lucide-react';
 import { TruckType } from '@/components/ApiDatabase';
@@ -147,22 +148,30 @@ export default function TruckTypesPage() {
   );
 
   const getModalityColor = (modality) => {
-    return modality === 'paletizados' 
-      ? 'bg-blue-100 text-blue-800' 
-      : 'bg-purple-100 text-purple-800';
+      switch (modality) {
+        case 'paletizados': return 'bg-blue-100 text-blue-800';
+        case 'bag': return 'bg-purple-100 text-purple-800';
+        case 'granel': return 'bg-orange-100 text-orange-800'; // Updated color for granel
+        default: return 'bg-gray-100 text-gray-800';
+      }
   };
 
   const getModalityLabel = (modality) => {
-    return modality === 'paletizados' ? 'Paletizados' : 'BAG';
+      switch (modality) {
+        case 'paletizados': return 'Paletizados';
+        case 'bag': return 'BAG';
+        case 'granel': return 'Granel';
+        default: return modality;
+      }
   };
 
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-gray-800 flex items-center">
+        {/* <h2 className="text-2xl font-bold text-gray-800 flex items-center">
           <Truck className="w-6 h-6 mr-2 text-green-600" />
           Tipos de Caminhão
-        </h2>
+        </h2> */}
         <Button 
           onClick={() => { setShowForm(true); setEditingTruck(null); }}
           className="bg-green-600 hover:bg-green-700"
@@ -207,6 +216,7 @@ export default function TruckTypesPage() {
                     placeholder="Ex: Truck Paletizado Grande" 
                     className="pl-10" 
                     required 
+                    maxLength={50}
                   />
                 </div>
               </div>
@@ -220,7 +230,10 @@ export default function TruckTypesPage() {
                     type="number" 
                     step="0.1"
                     value={formData.capacity} 
-                    onChange={(e) => handleInputChange('capacity', e.target.value)} 
+                    onChange={(e) => {
+                      if (e.target.value.length > 7) return;
+                      handleInputChange('capacity', e.target.value)
+                    }} 
                     placeholder="Ex: 10.5" 
                     className="pl-10" 
                     required 
@@ -237,7 +250,10 @@ export default function TruckTypesPage() {
                     type="number" 
                     step="0.01"
                     value={formData.baseRate} 
-                    onChange={(e) => handleInputChange('baseRate', e.target.value)} 
+                    onChange={(e) => {
+                      if (e.target.value.length > 7) return;
+                      handleInputChange('baseRate', e.target.value)
+                    }} 
                     placeholder="Ex: 2.50" 
                     className="pl-10" 
                     required 
@@ -254,6 +270,7 @@ export default function TruckTypesPage() {
                   <SelectContent>
                     <SelectItem value="paletizados">Paletizados</SelectItem>
                     <SelectItem value="bag">BAG</SelectItem>
+                    <SelectItem value="granel">Granel</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

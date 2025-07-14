@@ -1,89 +1,63 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Auth } from '@/api/entities';
 
 const AuthContext = createContext();
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error('useAuth deve ser usado dentro de um AuthProvider');
   }
   return context;
 };
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    checkAuthStatus();
-  }, []);
+  // Usuários pré-cadastrados
+  const users = [
+    { id: 1, username: 'admin', password: 'admin123', name: 'Administrador' },
+    { id: 2, username: 'user1', password: 'user123', name: 'Usuário 1' },
+    { id: 3, username: 'user2', password: 'user456', name: 'Usuário 2' },
+    { id: 4, username: 'demo', password: 'demo123', name: 'Usuário Demo' }
+  ];
 
-  const checkAuthStatus = async () => {
-    try {
-      // Verifica se há um usuário logado no localStorage
-      const storedUser = localStorage.getItem('currentUser');
-      if (storedUser) {
-        setUser(JSON.parse(storedUser));
-      }
-    } catch (error) {
-      console.log('No authenticated user');
-      setUser(null);
+  useEffect(() => {
+    // Verificar se há uma sessão salva no localStorage
+    const savedUser = localStorage.getItem('currentUser');
+    if (savedUser) {
+      setCurrentUser(JSON.parse(savedUser));
+      setIsAuthenticated(true);
     }
     setLoading(false);
-  };
+  }, []);
 
-  const login = async (email, password) => {
-    try {
-      // Simulação de login para admin - em produção, usar Auth.signIn
-      if (email === 'admin@unionagro.com' && password === 'admin123') {
-        const adminUser = {
-          id: 'admin-1',
-          email: 'admin@unionagro.com',
-          fullName: 'Administrador',
-          userType: 'admin'
-        };
-        
-        setUser(adminUser);
-        localStorage.setItem('currentUser', JSON.stringify(adminUser));
-        return { success: true };
-      }
-      
-      // Para outros usuários, tentar autenticação real
-      // Comentado até que o SDK esteja configurado corretamente
-      /*
-      const result = await Auth.signIn({ email, password });
-      setUser(result.user);
-      localStorage.setItem('currentUser', JSON.stringify(result.user));
+  const login = (username, password) => {
+    const user = users.find(u => u.username === username && u.password === password);
+    if (user) {
+      const userWithoutPassword = { id: user.id, username: user.username, name: user.name };
+      setCurrentUser(userWithoutPassword);
+      setIsAuthenticated(true);
+      localStorage.setItem('currentUser', JSON.stringify(userWithoutPassword));
       return { success: true };
-      */
-      
-      return { success: false, error: 'Credenciais inválidas' };
-    } catch (error) {
-      return { success: false, error: error.message || 'Erro ao fazer login' };
     }
+    return { success: false, message: 'Usuário ou senha inválidos' };
   };
 
-  const logout = async () => {
-    try {
-      // Limpar dados locais
-      setUser(null);
-      localStorage.removeItem('currentUser');
-      
-      // Em produção, usar Auth.signOut()
-      // await Auth.signOut();
-    } catch (error) {
-      console.error('Logout error:', error);
-    }
+  const logout = () => {
+    setCurrentUser(null);
+    setIsAuthenticated(false);
+    localStorage.removeItem('currentUser');
   };
 
   const value = {
-    user,
+    isAuthenticated,
+    currentUser,
     login,
     logout,
     loading,
-    isAuthenticated: !!user,
-    isAdmin: user?.userType === 'admin' || user?.email === 'admin@unionagro.com'
+    users: users.map(u => ({ id: u.id, username: u.username, name: u.name })) // Sem senhas
   };
 
   return (
@@ -92,3 +66,4 @@ export const AuthProvider = ({ children }) => {
     </AuthContext.Provider>
   );
 };
+

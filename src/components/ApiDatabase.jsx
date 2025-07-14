@@ -1,6 +1,7 @@
 
 // API Database - Conecta com a API Express
-const API_BASE_URL = 'http://localhost:3001/api';
+const API_BASE_URL = 'http://10.0.2.4:3001/api';
+
 
 class ApiDatabase {
     async request(endpoint, options = {}) {
@@ -127,11 +128,30 @@ export const Carrier = new ApiEntity('carriers');
 
 // Enhanced User entity with authentication
 export const User = {
+    async login(username, password) {
+        // Esta função se comunicará com a nova rota /api/login no seu backend
+        const response = await apiDB.request('/login', {
+            method: 'POST',
+            body: JSON.stringify({ username, password }),
+        });
+        
+        // Se o login for bem-sucedido, a API retornará os dados do usuário
+        if (response && response.id) {
+            localStorage.setItem('currentUser', JSON.stringify(response));
+        }
+        
+        return response;
+    },
+
+    async logout() {
+        localStorage.removeItem('currentUser');
+        // Recarrega a página para garantir que o estado do usuário seja limpo
+        window.location.reload();
+    },
+    
     async me() {
         const user = JSON.parse(localStorage.getItem('currentUser') || 'null');
-        if (!user) {
-            throw new Error('Usuário não autenticado');
-        }
+        // Modificado para não lançar erro, apenas retorna null se não estiver logado
         return user;
     },
     

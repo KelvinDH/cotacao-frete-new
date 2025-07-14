@@ -1,29 +1,38 @@
+
 import React, { useState, useEffect } from 'react';
-import { FileText, Plus, MapPin, Weight, DollarSign, Calendar, Truck, Route, Upload, Image as ImageIcon, X, Eye } from "lucide-react";
-import { FreightMap, TruckType, Carrier, UploadFile } from "@/components/ApiDatabase";
+import { FileText, Plus, MapPin, Weight, DollarSign, Calendar, Truck, Route, Upload, Image as ImageIcon, Eye, X, CheckCircle, Users } from "lucide-react";
+import { FreightMap, TruckType, Carrier, UploadFile, User } from "@/components/ApiDatabase";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { 
+import { Checkbox } from "@/components/ui/checkbox";
+import {
   Popover,
   PopoverContent,
   PopoverTrigger
 } from "@/components/ui/popover";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { getBrazilIsoNow } from '../utils/getBrazilIsoNow';
+import { sendEmail } from '../utils/sendEmail';
+
+// Opções pré-definidas para o campo Gerente - ✅ ADICIONADO VENDA DIRETA
+const managerOptions = ["TIAGO LOPES TOLENTINO", "CLAUDIO FEUSER", "DIEGO JOSÉ MANIAS MARSÃO", "VENDA DIRETA"];
 
 export default function QuotePage() {
   const [formData, setFormData] = useState({
     mapNumber: '',
-    origin: '',
+    origin: 'Pederneiras/SP', // Valor fixo pré-definido
     destination: '',
     totalKm: '',
     weight: '',
     mapValue: '',
     truckType: '',
-    selectedCarrier: '',
+    selectedCarriers: [],
     loadingMode: '',
     loadingDate: null,
     routeInfo: '',
@@ -34,11 +43,24 @@ export default function QuotePage() {
   const [carriers, setCarriers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
-  const [imagePreview, setImagePreview] = useState(null);
-  const [showImageModal, setShowImageModal] = useState(false);
+  const [showImagePreview, setShowImagePreview] = useState(false);
+
+  // Novos estados para Gerente/Valor e para o tipo de usuário
+  const [managerFields, setManagerFields] = useState([{ gerente: '', valor: '' }]);
+  const [currentUser, setCurrentUser] = useState(null);
 
   useEffect(() => {
     loadTruckTypesAndCarriers();
+    const fetchUser = async () => {
+      try {
+        const user = await User.me();
+        setCurrentUser(user);
+      } catch (error) {
+        console.error("Não foi possível buscar o usuário:", error);
+        setCurrentUser({ userType: 'admin' }); // Fallback para admin em caso de erro na busca
+      }
+    };
+    fetchUser();
   }, []);
 
   const loadTruckTypesAndCarriers = async () => {
@@ -54,22 +76,133 @@ export default function QuotePage() {
   };
 
   const handleInputChange = (field, value) => {
+    // Impede alteração do campo origin
+    if (field === 'origin') return;
+    
+    // Se a modalidade de carregamento for alterada, limpa a seleção de transportadoras E tipo de caminhão
+    if (field === 'loadingMode') {
+      setFormData(prev => ({
+        ...prev,
+        loadingMode: value,
+        selectedCarriers: [], // Limpa as transportadoras selecionadas
+        truckType: '' // Limpa o tipo de caminhão selecionado
+      }));
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        [field]: value
+      }));
+    }
+  };
+
+  const handleMapNumberChange = (value) => {
+    const digitsOnly = value.replace(/\D/g, '');
+    const truncatedDigits = digitsOnly.slice(0, 8);
+
+    let maskedValue = truncatedDigits;
+    if (truncatedDigits.length > 2) {
+      maskedValue = `${truncatedDigits.slice(0, 2)}/${truncatedDigits.slice(2)}`;
+    }
+
+    handleInputChange('mapNumber', maskedValue);
+  };
+
+  const handleCarrierToggle = (carrierName, checked) => {
     setFormData(prev => ({
       ...prev,
-      [field]: value
+      selectedCarriers: checked
+        ? [...prev.selectedCarriers, carrierName]
+        : prev.selectedCarriers.filter(name => name !== carrierName)
     }));
+  };
+
+  // Função para calcular o total dos valores dos gerentes
+  const calculateManagersTotal = () => {
+    return managerFields.reduce((total, field) => {
+      const valor = parseFloat(field.valor) || 0;
+      return total + valor;
+    }, 0);
+  };
+
+  // Função para verificar se pode adicionar mais gerentes
+  const canAddMoreManagers = () => {
+    const mapValue = parseFloat(formData.mapValue) || 0;
+    const managersTotal = calculateManagersTotal();
+    return mapValue > 0 && managersTotal < mapValue;
+  };
+
+  // Função para obter o valor restante disponível
+  const getRemainingValue = () => {
+    const mapValue = parseFloat(formData.mapValue) || 0;
+    const managersTotal = calculateManagersTotal();
+    return Math.max(0, mapValue - managersTotal);
+  };
+
+  // Funções para gerenciar os campos de Gerente/Valor
+  const handleManagerChange = (index, field, value) => {
+    const updatedFields = [...managerFields];
+    
+    // Validação para o campo valor
+    if (field === 'valor') {
+      // Limita a 9 dígitos
+      if (value.length > 9) return;
+      
+      const numericValue = parseFloat(value) || 0;
+      const mapValue = parseFloat(formData.mapValue) || 0;
+      
+      // Validação 1: Valor individual não pode ser maior que o valor do mapa
+      if (mapValue > 0 && numericValue > mapValue) {
+        alert(`O valor do gerente (${numericValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}) não pode ser maior que o valor do mapa (R$ ${mapValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`);
+        return;
+      }
+
+      // Calcular o total atual sem este campo para verificar se a soma ultrapassa o limite
+      const currentTotalExcludingThisField = managerFields.reduce((total, f, i) => {
+        if (i === index) return total; // Pula o campo atual
+        return total + (parseFloat(f.valor) || 0);
+      }, 0);
+
+      // Validação 2: A soma dos valores dos gerentes não pode ultrapassar o valor do mapa
+      if (mapValue > 0 && (currentTotalExcludingThisField + numericValue) > mapValue) {
+        const remaining = Math.max(0, mapValue - currentTotalExcludingThisField);
+        alert(`O valor excede o limite do mapa. Valor máximo disponível para este campo: R$ ${remaining.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`);
+        return;
+      }
+    }
+    
+    updatedFields[index][field] = value;
+    setManagerFields(updatedFields);
+  };
+
+  const addManagerField = () => {
+    if (!formData.mapValue || parseFloat(formData.mapValue) === 0) {
+      alert("Por favor, preencha o 'Valor do Mapa' antes de adicionar gerentes.");
+      return;
+    }
+
+    if (!canAddMoreManagers()) {
+      const mapValue = parseFloat(formData.mapValue) || 0;
+      const managersTotal = calculateManagersTotal();
+      
+      if (managersTotal >= mapValue) {
+        alert(`Não é possível adicionar mais gerentes. O valor total dos gerentes (R$ ${managersTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}) já atingiu o valor do mapa (R$ ${mapValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`);
+      } else {
+        alert(`Valor do mapa insuficiente para adicionar mais gerentes. Complete o valor dos gerentes existentes primeiro.`);
+      }
+      return;
+    }
+    setManagerFields([...managerFields, { gerente: '', valor: '' }]);
+  };
+
+  const removeManagerField = (index) => {
+    const updatedFields = [...managerFields];
+    updatedFields.splice(index, 1);
+    setManagerFields(updatedFields);
   };
 
   const handleImageUpload = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
-
-    // Criar preview local da imagem
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      setImagePreview(e.target.result);
-    };
-    reader.readAsDataURL(file);
 
     setUploadingImage(true);
     try {
@@ -81,9 +214,242 @@ export default function QuotePage() {
     } catch (error) {
       console.error("Error uploading image:", error);
       alert("Erro ao fazer upload da imagem. Verifique se a API está rodando.");
-      setImagePreview(null);
     } finally {
       setUploadingImage(false);
+    }
+  };
+
+  // ✅ NOVA FUNÇÃO: Para mapear modalidades fracionadas às suas principais
+  const getCompatibleModality = (selectedModality) => {
+    switch (selectedModality) {
+      case 'bag_fracionado':
+        return 'bag';
+      case 'paletizados_fracionado':
+        return 'paletizados';
+      default:
+        return selectedModality;
+    }
+  };
+
+  // Função para filtrar tipos de caminhão baseado na modalidade selecionada
+  const getFilteredTruckTypes = () => {
+    if (!formData.loadingMode) {
+      return [];
+    }
+    // ✅ ATUALIZADO: Usa a modalidade compatível para filtrar
+    const compatibleModality = getCompatibleModality(formData.loadingMode);
+    return truckTypes.filter(truck => truck.modality === compatibleModality);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    if (!formData.mapNumber || !formData.origin || !formData.destination || !formData.totalKm || !formData.weight || !formData.mapValue || !formData.truckType || formData.selectedCarriers.length === 0 || !formData.loadingMode || !formData.loadingDate) {
+      alert("Por favor, preencha todos os campos obrigatórios e selecione pelo menos uma transportadora");
+      return;
+    }
+
+    // ✅ NOVA LÓGICA: Filtrar apenas transportadoras que ainda não receberam este mapa
+    let carriersToSend = [];
+    let duplicateCarriers = [];
+    
+    try {
+      const allMaps = await FreightMap.list();
+      
+      // Separar transportadoras que já receberam este mapa das que não receberam
+      duplicateCarriers = formData.selectedCarriers.filter(carrierName =>
+        allMaps.some(map => map.mapNumber === formData.mapNumber && map.selectedCarrier === carrierName)
+      );
+      
+      // Manter apenas as transportadoras que ainda não receberam este mapa
+      carriersToSend = formData.selectedCarriers.filter(carrierName =>
+        !allMaps.some(map => map.mapNumber === formData.mapNumber && map.selectedCarrier === carrierName)
+      );
+
+      // Avisar sobre transportadoras que já receberam, mas continuar com as outras
+      if (duplicateCarriers.length > 0) {
+        const message = `As seguintes transportadoras já receberam o mapa ${formData.mapNumber}: ${duplicateCarriers.join(', ')}.\n\nA cotação será enviada apenas para as demais transportadoras selecionadas.`;
+        if (!confirm(message + "\n\nDeseja continuar?")) {
+          return;
+        }
+      }
+
+      // Se não sobrou nenhuma transportadora para enviar
+      if (carriersToSend.length === 0) {
+        alert(`Todas as transportadoras selecionadas já receberam o mapa ${formData.mapNumber}. Selecione outras transportadoras ou use um número de mapa diferente.`);
+        return;
+      }
+    } catch (error) {
+      console.error("Erro ao verificar mapa existente:", error);
+      // Em caso de erro, continua com todas as transportadoras selecionadas
+      carriersToSend = [...formData.selectedCarriers];
+      duplicateCarriers = []; // Clear duplicates if we can't verify
+    }
+
+    // Validação final dos gerentes antes do submit
+    const mapValue = parseFloat(formData.mapValue) || 0;
+    const managersTotal = calculateManagersTotal();
+
+    if (currentUser && currentUser.userType !== 'carrier') {
+      if (managersTotal > mapValue) {
+        alert(`Erro: O valor total dos gerentes (R$ ${managersTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}) excede o valor do mapa (R$ ${mapValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}). Por favor, ajuste os valores.`);
+        return;
+      }
+      if (managersTotal < mapValue && managerFields.some(f => f.gerente || f.valor)) { 
+        alert(`Atenção: O valor total dos gerentes (R$ ${managersTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}) é menor que o valor do mapa (R$ ${mapValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}). Considere ajustar ou adicionar mais gerentes.`);
+      }
+    }
+
+    setLoading(true);
+    try {
+      // Criar timestamp em horário de Brasília
+      const now = new Date();
+
+      const baseFreightData = {
+        mapNumber: formData.mapNumber,
+        mapImage: formData.mapImage,
+        origin: formData.origin,
+        destination: formData.destination,
+        totalKm: parseInt(formData.totalKm),
+        weight: parseFloat(formData.weight),
+        mapValue: parseFloat(formData.mapValue),
+        truckType: formData.truckType,
+        loadingMode: formData.loadingMode,
+        loadingDate: formData.loadingDate ? format(formData.loadingDate, 'yyyy-MM-dd') : '',
+        routeInfo: formData.routeInfo,
+        managers: managerFields
+          .filter(f => f.gerente && f.valor && parseFloat(f.valor) > 0)
+          .map(f => ({ ...f, valor: parseFloat(f.valor) })),
+        carrierProposals: {},
+        status: 'negotiating',
+        invoiceUrls: [],
+        created_date: getBrazilIsoNow(),
+        updated_date: getBrazilIsoNow()
+      };
+
+      // ✅ CRIAR UM MAPA APENAS PARA AS TRANSPORTADORAS QUE AINDA NÃO RECEBERAM
+      const freightPromises = carriersToSend.map(carrierName => {
+        return FreightMap.create({
+          ...baseFreightData,
+          selectedCarrier: carrierName
+        });
+      });
+
+      await Promise.all(freightPromises);
+
+      // ENVIAR EMAILS PARA AS TRANSPORTADORAS (apenas para as que receberam a cotação)
+      try {
+        // Buscar usuários do tipo carrier para obter seus emails
+        const users = await User.list();
+        
+        const emailPromises = carriersToSend.map(async (carrierName) => {
+          // Encontrar o usuário carrier correspondente à transportadora
+          const carrierUser = users.find(user => 
+            user.userType === 'carrier' && 
+            user.carrierName === carrierName && 
+            user.active
+          );
+          
+          if (!carrierUser) {
+            console.warn(`Usuário não encontrado para a transportadora: ${carrierName}. Email não enviado.`);
+            return undefined;
+          }
+
+          let loadingModeText = '';
+          switch (formData.loadingMode) {
+            case 'paletizados':
+              loadingModeText = 'Paletizados';
+              break;
+            case 'bag':
+              loadingModeText = 'BAG';
+              break;
+            case 'granel':
+              loadingModeText = 'Granel';
+              break;
+            case 'bag_fracionado':
+              loadingModeText = 'BAG Fracionado';
+              break;
+            case 'paletizados_fracionado':
+              loadingModeText = 'Paletizados Fracionado';
+              break;
+            default:
+              loadingModeText = formData.loadingMode;
+          }
+          
+          const emailSubject = `🚛 Nova Cotação de Frete - Mapa ${formData.mapNumber}`;
+          const emailBody = `
+            <h2>Olá, ${carrierUser.fullName}!</h2>
+            <p>Você recebeu uma nova cotação de frete:</p>
+            
+            <h3>📋 DETALHES DA COTAÇÃO:</h3>
+            <ul>
+              <li><strong>Mapa:</strong> ${formData.mapNumber}</li>
+              <li><strong>Rota:</strong> ${formData.origin} → ${formData.destination}</li>
+              <li><strong>Distância:</strong> ${formData.totalKm} km</li>
+              <li><strong>Peso:</strong> ${formData.weight} kg</li>
+              <li><strong>Valor do Mapa:</strong> R$ ${parseFloat(formData.mapValue).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</li>
+              <li><strong>Tipo de Caminhão:</strong> ${formData.truckType}</li>
+              <li><strong>Modalidade:</strong> ${loadingModeText}</li>
+              <li><strong>Data de Carregamento:</strong> ${formData.loadingDate ? format(formData.loadingDate, 'dd/MM/yyyy', { locale: ptBR }) : 'Não informada'}</li>
+            </ul>
+            
+            ${formData.routeInfo ? `<p><strong>📝 Observações da Rota:</strong><br>${formData.routeInfo}</p>` : ''}
+            
+            <p>⏰ <strong>Acesse o sistema para enviar sua proposta!</strong></p>
+            
+            <p>Atenciosamente,<br>Equipe UnionAgro</p>
+          `;
+
+          return sendEmail({
+            to: carrierUser.email,
+            subject: emailSubject,
+            html: emailBody
+          });
+        });
+
+        // Filtrar emails válidos antes de enviar
+        const validEmailPromises = emailPromises.filter(promise => promise !== undefined);
+        if (validEmailPromises.length > 0) {
+          await Promise.all(validEmailPromises);
+          console.log('Emails enviados para as transportadoras com sucesso!');
+        } else {
+          console.log('Nenhum email para transportadoras elegíveis foi enviado.');
+        }
+      } catch (emailError) {
+        console.error('Erro ao enviar emails para transportadoras:', emailError);
+        // Não bloqueia o fluxo principal se houver erro no email
+      }
+
+      // ✅ MENSAGEM DE SUCESSO PERSONALIZADA
+      let successMessage = `Cotação criada com sucesso para ${carriersToSend.length} transportadora(s)!`;
+      if (duplicateCarriers.length > 0) {
+        successMessage += `\n\nNota: ${duplicateCarriers.length} transportadora(s) foram puladas por já terem recebido este mapa.`;
+      }
+      successMessage += '\n\nEmails de notificação foram enviados.';
+      
+      alert(successMessage);
+
+      // Reset do form mantendo a origem fixa
+      setFormData({
+        mapNumber: '',
+        origin: 'Pederneiras/SP', // Mantém origem fixa no reset
+        destination: '',
+        totalKm: '',
+        weight: '',
+        mapValue: '',
+        truckType: '',
+        selectedCarriers: [],
+        loadingMode: '',
+        loadingDate: null,
+        routeInfo: '',
+        mapImage: ''
+      });
+      setManagerFields([{ gerente: '', valor: '' }]);
+    } catch (error) {
+      console.error("Error creating freight map:", error);
+      alert("Erro ao criar cotação. Tente novamente.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -92,403 +458,626 @@ export default function QuotePage() {
       ...prev,
       mapImage: ''
     }));
-    setImagePreview(null);
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    
-    if (!formData.mapNumber || !formData.origin || !formData.destination || !formData.totalKm || !formData.weight || !formData.mapValue || !formData.truckType || !formData.selectedCarrier || !formData.loadingMode || !formData.loadingDate) {
-      alert("Por favor, preencha todos os campos obrigatórios");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const freightData = {
-        ...formData,
-        totalKm: parseInt(formData.totalKm),
-        weight: parseFloat(formData.weight),
-        mapValue: parseFloat(formData.mapValue),
-        loadingDate: formData.loadingDate ? format(formData.loadingDate, 'yyyy-MM-dd') : '',
-        carrierProposals: {},
-        status: 'negotiating',
-        invoiceUrls: []
-      };
-
-      await FreightMap.create(freightData);
-      
-      alert("Cotação criada com sucesso!");
-      
-      // Reset form
-      setFormData({
-        mapNumber: '',
-        origin: '',
-        destination: '',
-        totalKm: '',
-        weight: '',
-        mapValue: '',
-        truckType: '',
-        selectedCarrier: '',
-        loadingMode: '',
-        loadingDate: null,
-        routeInfo: '',
-        mapImage: ''
-      });
-      setImagePreview(null);
-    } catch (error) {
-      console.error("Error creating freight map:", error);
-      alert("Erro ao criar cotação. Verifique se a API está rodando.");
-    } finally {
-      setLoading(false);
-    }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50 p-6">
-      <div className="max-w-6xl mx-auto">
-        <div className="text-center mb-8">
-          <h2 className="text-3xl font-bold text-gray-800 flex items-center justify-center mb-2">
-            <FileText className="w-8 h-8 mr-3 text-green-600" />
-            Nova Cotação de Frete
-          </h2>
-          <p className="text-gray-600">Preencha as informações para criar uma nova cotação</p>
-        </div>
-
-        <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-xl p-8 space-y-8">
-          {/* Seção 1: Identificação e Imagem */}
-          <div className="border-b border-gray-200 pb-6">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-              <FileText className="w-5 h-5 mr-2 text-green-600" />
-              Identificação do Mapa
-            </h3>
-            
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Número do Mapa *
-                </label>
-                <Input
-                  type="text"
-                  value={formData.mapNumber}
-                  onChange={(e) => handleInputChange('mapNumber', e.target.value)}
-                  placeholder="Ex: MAP001"
-                  className="text-lg"
-                  required
-                />
-              </div>
-              
-              {/* Upload de Imagem com Preview */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Imagem do Mapa
-                </label>
-                
-                {!imagePreview && !formData.mapImage ? (
-                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-green-400 transition-colors">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleImageUpload}
-                      disabled={uploadingImage}
-                      className="hidden"
-                      id="image-upload"
-                    />
-                    <label 
-                      htmlFor="image-upload" 
-                      className="cursor-pointer flex flex-col items-center"
-                    >
-                      {uploadingImage ? (
-                        <div className="flex items-center text-green-600">
-                          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-600 mr-2"></div>
-                          Carregando...
-                        </div>
-                      ) : (
-                        <>
-                          <Upload className="w-8 h-8 text-gray-400 mb-2" />
-                          <span className="text-sm text-gray-600">Clique para fazer upload</span>
-                          <span className="text-xs text-gray-400 mt-1">PNG, JPG até 10MB</span>
-                        </>
-                      )}
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6">
+      <div className="max-w-4xl mx-auto">
+        {/* Formulário Principal Centralizado */}
+        <Card className="shadow-xl border-0">
+          <CardHeader className="bg-gradient-to-r from-green-600 to-green-700 text-white rounded-t-lg">
+            <CardTitle className="text-xl">Informações da Cotação</CardTitle>
+          </CardHeader>
+          <CardContent className="p-6">
+            <form onSubmit={handleSubmit} className="space-y-6">
+              {/* Identificação */}
+              <div className="bg-gray-50 rounded-lg p-4">
+                <h3 className="font-semibold text-gray-800 mb-4 flex items-center">
+                  <FileText className="w-5 h-5 mr-2 text-green-600" />
+                  Identificação
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Número do Mapa *
                     </label>
+                    <Input
+                      type="text"
+                      value={formData.mapNumber}
+                      onChange={(e) => handleMapNumberChange(e.target.value)}
+                      placeholder="00/000000"
+                      className="border-gray-300 focus:border-green-500 focus:ring-green-500"
+                      maxLength={9}
+                      required
+                    />
                   </div>
-                ) : (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Modalidade de Carregamento *
+                    </label>
+                    <Select value={formData.loadingMode} onValueChange={(value) => handleInputChange('loadingMode', value)}>
+                      <SelectTrigger className="border-gray-300">
+                        <SelectValue placeholder="Selecione a modalidade" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="paletizados">📦 Paletizados</SelectItem>
+                        <SelectItem value="bag">🎒 BAG</SelectItem>
+                        <SelectItem value="granel">🌾 Granel</SelectItem>
+                        <SelectItem value="bag_fracionado">🎒 BAG Fracionado</SelectItem>
+                        <SelectItem value="paletizados_fracionado">📦 Paletizados Fracionado</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+
+              {/* SEÇÃO DO MAPA - CENTRALIZADA E MAIOR */}
+              <div className="bg-indigo-50 rounded-lg p-6">
+                <h3 className="font-semibold text-gray-800 mb-6 flex items-center justify-center">
+                  <ImageIcon className="w-6 h-6 mr-2 text-indigo-600" />
+                  Mapa da Rota
+                </h3>
+
+                <div className="flex justify-center">
+                  {!formData.mapImage ? (
+                    <div className="w-full max-w-2xl border-2 border-dashed border-indigo-300 rounded-lg p-12 text-center hover:border-indigo-400 transition-colors bg-white">
+                      <div className="space-y-6">
+                        <div className="mx-auto w-20 h-20 bg-indigo-100 rounded-full flex items-center justify-center">
+                          <Upload className="w-10 h-10 text-indigo-600" />
+                        </div>
+                        <div>
+                          <p className="text-lg text-gray-700 font-medium">Anexar Imagem do Mapa</p>
+                          <p className="text-sm text-gray-500 mt-2">PNG, JPG até 10MB</p>
+                        </div>
+                        <div className="relative">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleImageUpload}
+                            disabled={uploadingImage}
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={uploadingImage}
+                            className="border-indigo-300 text-indigo-600 hover:bg-indigo-50 px-8 py-3"
+                          >
+                            {uploadingImage ? (
+                              <div className="flex items-center">
+                                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-indigo-600 mr-3"></div>
+                                Enviando...
+                              </div>
+                            ) : (
+                              <>
+                                <Upload className="w-5 h-5 mr-2" />
+                                Escolher Arquivo
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="w-full max-w-2xl space-y-4">
+                      {/* Preview da Imagem */}
+                      <div className="relative group bg-white rounded-lg p-4 shadow-sm">
+                        <img
+                          src={formData.mapImage}
+                          alt="Mapa da Rota"
+                          className="w-full h-[500px] object-contain rounded-lg"
+                        />
+                        <div className="absolute inset-4 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-300 rounded-lg flex items-center justify-center">
+                          <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex gap-3">
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={() => setShowImagePreview(true)}
+                              className="bg-white text-gray-800 hover:bg-gray-100"
+                            >
+                              <Eye className="w-4 h-4 mr-2" />
+                              Visualizar
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="destructive"
+                              onClick={removeImage}
+                              className="bg-red-600 hover:bg-red-700"
+                            >
+                              <X className="w-4 h-4 mr-2" />
+                              Remover
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Informações da Imagem */}
+                      <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
+                        <div className="flex items-center justify-center text-green-700 mb-2">
+                          <CheckCircle className="w-6 h-6 mr-2" />
+                          <span className="font-medium text-lg">Imagem carregada com sucesso!</span>
+                        </div>
+                        <p className="text-sm text-green-600">
+                          Clique na imagem para visualizar em tamanho maior
+                        </p>
+                      </div>
+
+                      {/* Botão para trocar imagem */}
+                      <div className="relative flex justify-center">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleImageUpload}
+                          disabled={uploadingImage}
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="border-gray-300 px-8"
+                          disabled={uploadingImage}
+                        >
+                          <Upload className="w-4 h-4 mr-2" />
+                          Trocar Imagem
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Informações da Rota */}
+              <div className="bg-blue-50 rounded-lg p-4">
+                <h3 className="font-semibold text-gray-800 mb-4 flex items-center">
+                  <MapPin className="w-5 h-5 mr-2 text-blue-600" />
+                  Informações da Rota
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Origem (Fixo)
+                    </label>
+                    <Input
+                      type="text"
+                      value={formData.origin}
+                      readOnly
+                      disabled
+                      className="border-gray-300 bg-gray-100 text-gray-600 cursor-not-allowed"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      ⚠️ Origem fixa do sistema
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Destino *
+                    </label>
+                    <Input
+                      type="text"
+                      value={formData.destination}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        // Permite apenas letras (incluindo acentuadas), espaços, barras e limita a 25 caracteres
+                        if (value.length <= 25 && /^[a-zA-ZÀ-ÿ\s\/]*$/.test(value)) {
+                          handleInputChange('destination', value);
+                        }
+                      }}
+                      placeholder="Ex: Rio de Janeiro/RJ"
+                      className="border-gray-300 focus:border-blue-500"
+                      maxLength={25}
+                      required
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Máximo 25 caracteres - apenas letras, espaços e barras (/)
+                    </p>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Distância Total (km) *
+                  </label>
                   <div className="relative">
-                    <div className="border rounded-lg p-4 bg-gray-50">
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="text-sm font-medium text-green-700 flex items-center">
-                          <ImageIcon className="w-4 h-4 mr-2" />
-                          Imagem do Mapa
-                        </span>
-                        <div className="flex gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setShowImageModal(true)}
-                          >
-                            <Eye className="w-4 h-4 mr-1" />
-                            Visualizar
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={removeImage}
-                            className="text-red-600 hover:text-red-700"
-                          >
-                            <X className="w-4 h-4 mr-1" />
-                            Remover
-                          </Button>
+                    <Route className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                    <Input
+                      type="number"
+                      value={formData.totalKm}
+                      onChange={(e) => handleInputChange('totalKm', e.target.value)}
+                      placeholder="Ex: 450"
+                      className="pl-10 border-gray-300 focus:border-blue-500"
+                      required
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Carga e Valores */}
+              <div className="bg-yellow-50 rounded-lg p-4">
+                <h3 className="font-semibold text-gray-800 mb-4 flex items-center">
+                  <Weight className="w-5 h-5 mr-2 text-yellow-600" />
+                  Carga e Valores
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Peso (kg) *
+                    </label>
+                    <div className="relative">
+                      <Weight className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={formData.weight}
+                        onChange={(e) => {
+                          if (e.target.value.length > 9) return;
+                          handleInputChange('weight', e.target.value)
+                        }}
+                        placeholder="Ex: 15000"
+                        className="pl-10 border-gray-300 focus:border-yellow-500"
+                        required
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Valor do Mapa (R$) *
+                    </label>
+                    <div className="relative">
+                      <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={formData.mapValue}
+                        onChange={(e) => {
+                          if (e.target.value.length > 9) return;
+                          handleInputChange('mapValue', e.target.value)
+                        }}
+                        placeholder="Ex: 2500.00"
+                        className="pl-10 border-gray-300 focus:border-yellow-500"
+                        required
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* SEÇÃO CONDICIONAL: Gerente e Valor */}
+              {currentUser && currentUser.userType !== 'carrier' && (
+                <div className="bg-teal-50 rounded-lg p-4">
+                  <h3 className="font-semibold text-gray-800 mb-4 flex items-center">
+                    <Users className="w-5 h-5 mr-2 text-teal-600" />
+                    Gerentes e Valores
+                  </h3>
+
+                  {/* Indicador de valor total e restante */}
+                  {formData.mapValue && parseFloat(formData.mapValue) > 0 && (
+                    <div className="mb-4 p-3 bg-white border border-teal-200 rounded-lg">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-center">
+                        <div>
+                          <p className="text-xs text-gray-600">Valor do Mapa</p>
+                          <p className="font-bold text-teal-700">
+                            R$ {parseFloat(formData.mapValue).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-600">Total Gerentes</p>
+                          <p className="font-bold text-blue-700">
+                            R$ {calculateManagersTotal().toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-600">Valor Restante</p>
+                          <p className={`font-bold ${getRemainingValue() > 0 ? 'text-green-700' : 'text-red-700'}`}>
+                            R$ {getRemainingValue().toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </p>
                         </div>
                       </div>
                       
-                      <div className="w-full h-32 bg-white rounded border overflow-hidden">
-                        <img 
-                          src={imagePreview || formData.mapImage} 
-                          alt="Preview do mapa" 
-                          className="w-full h-full object-cover"
-                        />
+                      {/* Barra de progresso visual */}
+                      <div className="mt-3">
+                        <div className="bg-gray-200 rounded-full h-2">
+                          <div 
+                            className={`h-2 rounded-full transition-all duration-300 ${
+                              calculateManagersTotal() >= parseFloat(formData.mapValue) 
+                                ? 'bg-red-500' 
+                                : calculateManagersTotal() > parseFloat(formData.mapValue) * 0.8 
+                                  ? 'bg-yellow-500' 
+                                  : 'bg-green-500'
+                            }`}
+                            style={{ 
+                              width: `${Math.min(100, (calculateManagersTotal() / parseFloat(formData.mapValue)) * 100)}%` 
+                            }}
+                          ></div>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1 text-center">
+                          {((calculateManagersTotal() / parseFloat(formData.mapValue)) * 100).toFixed(1)}% do valor total
+                        </p>
                       </div>
                     </div>
+                  )}
+
+                  <div className="space-y-3">
+                    {managerFields.map((field, index) => (
+                      <div key={index} className="flex items-center gap-2">
+                        <div className="flex-1">
+                          <label className="block text-xs font-medium text-gray-700 mb-1">
+                            Gerente
+                          </label>
+                          <Select value={field.gerente} onValueChange={(value) => handleManagerChange(index, 'gerente', value)}>
+                            <SelectTrigger className="border-gray-300 bg-white">
+                              <SelectValue placeholder="Selecione o gerente" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {managerOptions.map(option => (
+                                <SelectItem key={option} value={option}>{option}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex-1">
+                          <label className="block text-xs font-medium text-gray-700 mb-1">
+                            Valor (R$)
+                            {formData.mapValue && index === managerFields.length - 1 && getRemainingValue() > 0 && (
+                              <span className="text-xs text-green-600 ml-1">
+                                (Máx: R$ {getRemainingValue().toLocaleString('pt-BR', { minimumFractionDigits: 2 })})
+                              </span>
+                            )}
+                          </label>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            value={field.valor}
+                            onChange={(e) => handleManagerChange(index, 'valor', e.target.value)}
+                            placeholder="0.00"
+                            className="border-gray-300 bg-white focus:border-teal-500"
+                          />
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => removeManagerField(index)}
+                          className="text-red-500 hover:bg-red-100 mt-5"
+                          disabled={managerFields.length === 1}
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    ))}
                   </div>
-                )}
-              </div>
-            </div>
-          </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={addManagerField}
+                    className={`mt-4 border-dashed ${
+                      canAddMoreManagers() 
+                        ? 'border-teal-400 text-teal-600 hover:bg-teal-100 hover:text-teal-700' 
+                        : 'border-gray-300 text-gray-400 cursor-not-allowed'
+                    }`}
+                    disabled={!canAddMoreManagers()}
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    Adicionar Gerente
+                    {!canAddMoreManagers() && formData.mapValue && calculateManagersTotal() >= parseFloat(formData.mapValue) && (
+                      <span className="ml-2 text-xs">(Valor completo)</span>
+                    )}
+                  </Button>
 
-          {/* Seção 2: Rota */}
-          <div className="border-b border-gray-200 pb-6">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-              <MapPin className="w-5 h-5 mr-2 text-blue-600" />
-              Informações da Rota
-            </h3>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
-                  <MapPin className="w-4 h-4 mr-1 text-green-600" />
-                  Origem *
-                </label>
-                <Input
-                  type="text"
-                  value={formData.origin}
-                  onChange={(e) => handleInputChange('origin', e.target.value)}
-                  placeholder="Ex: São Paulo/SP"
-                  required
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
-                  <MapPin className="w-4 h-4 mr-1 text-red-600" />
-                  Destino *
-                </label>
-                <Input
-                  type="text"
-                  value={formData.destination}
-                  onChange={(e) => handleInputChange('destination', e.target.value)}
-                  placeholder="Ex: Rio de Janeiro/RJ"
-                  required
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
-                  <Route className="w-4 h-4 mr-1 text-purple-600" />
-                  Distância Total (km) *
-                </label>
-                <Input
-                  type="number"
-                  value={formData.totalKm}
-                  onChange={(e) => handleInputChange('totalKm', e.target.value)}
-                  placeholder="Ex: 450"
-                  required
-                />
-              </div>
-            </div>
-            
-            <div className="mt-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Informações Adicionais da Rota
-              </label>
-              <Textarea
-                value={formData.routeInfo}
-                onChange={(e) => handleInputChange('routeInfo', e.target.value)}
-                placeholder="Descreva informações adicionais sobre a rota, pedágios, restrições, etc..."
-                rows={3}
-                className="resize-none"
-              />
-            </div>
-          </div>
+                  {/* Alerta quando valor está próximo do limite */}
+                  {formData.mapValue && calculateManagersTotal() > 0 && calculateManagersTotal() < parseFloat(formData.mapValue) && (
+                    <div className="mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
+                      <p className="text-xs text-yellow-800">
+                        ⚠️ Atenção: O valor total dos gerentes (R$ {calculateManagersTotal().toLocaleString('pt-BR', { minimumFractionDigits: 2 })}) é menor que o valor do mapa (R$ {parseFloat(formData.mapValue).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}). Considere ajustar ou adicionar mais gerentes.
+                      </p>
+                    </div>
+                  )}
 
-          {/* Seção 3: Carga e Valores */}
-          <div className="border-b border-gray-200 pb-6">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-              <Weight className="w-5 h-5 mr-2 text-orange-600" />
-              Informações da Carga
-            </h3>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
-                  <Weight className="w-4 h-4 mr-1 text-orange-600" />
-                  Peso (kg) *
-                </label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={formData.weight}
-                  onChange={(e) => handleInputChange('weight', e.target.value)}
-                  placeholder="Ex: 15000"
-                  required
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
-                  <DollarSign className="w-4 h-4 mr-1 text-green-600" />
-                  Valor do Mapa (R$) *
-                </label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={formData.mapValue}
-                  onChange={(e) => handleInputChange('mapValue', e.target.value)}
-                  placeholder="Ex: 2500.00"
-                  required
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
-                  <Calendar className="w-4 h-4 mr-1 text-blue-600" />
-                  Data de Carregamento *
-                </label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" className="w-full justify-start text-left">
-                      {formData.loadingDate ? format(formData.loadingDate, 'dd/MM/yyyy', { locale: ptBR }) : 'Selecione a data'}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0">
-                    <CalendarComponent
-                      mode="single"
-                      selected={formData.loadingDate}
-                      onSelect={(date) => handleInputChange('loadingDate', date)}
-                      locale={ptBR}
-                    />
-                  </PopoverContent>
-                </Popover>
-              </div>
-            </div>
-          </div>
-
-          {/* Seção 4: Especificações */}
-          <div className="pb-6">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-              <Truck className="w-5 h-5 mr-2 text-indigo-600" />
-              Especificações do Transporte
-            </h3>
-            
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
-                  <Truck className="w-4 h-4 mr-1 text-indigo-600" />
-                  Tipo de Caminhão *
-                </label>
-                <Select value={formData.truckType} onValueChange={(value) => handleInputChange('truckType', value)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione o tipo de caminhão" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {truckTypes.map((truck) => (
-                      <SelectItem key={truck.id} value={truck.name}>
-                        {truck.name} ({truck.capacity}t - R${truck.baseRate}/km)
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Transportadora *
-                </label>
-                <Select value={formData.selectedCarrier} onValueChange={(value) => handleInputChange('selectedCarrier', value)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione a transportadora" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {carriers.map((carrier) => (
-                      <SelectItem key={carrier.id} value={carrier.name}>
-                        {carrier.name} ({carrier.type})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Modalidade de Carregamento *
-                </label>
-                <Select value={formData.loadingMode} onValueChange={(value) => handleInputChange('loadingMode', value)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione a modalidade" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="paletizados">Paletizados</SelectItem>
-                    <SelectItem value="bag">BAG</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </div>
-
-          {/* Submit Button */}
-          <div className="flex justify-end pt-6 border-t border-gray-200">
-            <Button 
-              type="submit" 
-              disabled={loading}
-              className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 text-lg"
-            >
-              {loading ? (
-                <div className="flex items-center">
-                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
-                  Criando Cotação...
-                </div>
-              ) : (
-                <div className="flex items-center">
-                  <Plus className="w-5 h-5 mr-2" />
-                  Criar Cotação
+                  {/* Alerta quando valor excede o limite */}
+                  {formData.mapValue && calculateManagersTotal() > parseFloat(formData.mapValue) && (
+                    <div className="mt-3 p-2 bg-red-50 border border-red-200 rounded-lg">
+                      <p className="text-xs text-red-800">
+                        ❌ Erro: O valor total dos gerentes (R$ {calculateManagersTotal().toLocaleString('pt-BR', { minimumFractionDigits: 2 })}) excede o valor do mapa (R$ {parseFloat(formData.mapValue).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}).
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
-            </Button>
-          </div>
-        </form>
 
-        {/* Modal para visualizar imagem */}
-        {showImageModal && (imagePreview || formData.mapImage) && (
-          <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-lg max-w-4xl max-h-[90vh] overflow-hidden">
-              <div className="flex justify-between items-center p-4 border-b">
-                <h3 className="text-lg font-semibold">Visualizar Imagem do Mapa</h3>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowImageModal(false)}
-                >
-                  <X className="w-5 h-5" />
-                </Button>
+              {/* Informações de Transporte */}
+              <div className="bg-purple-50 rounded-lg p-4">
+                <h3 className="font-semibold text-gray-800 mb-4 flex items-center">
+                  <Truck className="w-5 h-5 mr-2 text-purple-600" />
+                  Informações de Transporte
+                </h3>
+                <div className="grid grid-cols-1 gap-4 mb-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Tipo de Caminhão *
+                    </label>
+                    {!formData.loadingMode ? (
+                      <div className="p-3 bg-gray-100 border border-gray-300 rounded-md text-gray-500 text-center">
+                        Selecione primeiro a "Modalidade de Carregamento" para ver os tipos de caminhão disponíveis
+                      </div>
+                    ) : getFilteredTruckTypes().length === 0 ? (
+                      <div className="p-3 bg-yellow-100 border border-yellow-300 rounded-md text-yellow-800 text-center">
+                        Nenhum tipo de caminhão cadastrado para a modalidade "{
+                          formData.loadingMode === 'paletizados' ? 'Paletizados' : 
+                          formData.loadingMode === 'bag' ? 'BAG' : 
+                          formData.loadingMode === 'granel' ? 'Granel' : 
+                          formData.loadingMode === 'bag_fracionado' ? 'BAG Fracionado' :
+                          formData.loadingMode === 'paletizados_fracionado' ? 'Paletizados Fracionado' :
+                          formData.loadingMode
+                        }"
+                      </div>
+                    ) : (
+                      <Select value={formData.truckType} onValueChange={(value) => handleInputChange('truckType', value)}>
+                        <SelectTrigger className="border-gray-300">
+                          <SelectValue placeholder="Selecione o tipo de caminhão" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {getFilteredTruckTypes().map((truck) => (
+                            <SelectItem key={truck.id} value={truck.name}>
+                              <div className="flex items-center">
+                                <Truck className="w-4 h-4 mr-2" />
+                                {truck.name} ({truck.capacity}t - R${truck.baseRate}/km)
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-3">
+                      Transportadoras * (Selecione uma ou mais)
+                    </label>
+                    <div className="border rounded-lg p-4 bg-white max-h-48 overflow-y-auto border-gray-300">
+                      {carriers.length === 0 ? (
+                        <p className="text-gray-500 text-center py-4">Nenhuma transportadora cadastrada</p>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {carriers
+                            .filter(carrier => carrier.active)
+                            .filter(carrier => {
+                              if (!formData.loadingMode) return true;
+                              // ✅ ATUALIZADO: Usa a modalidade compatível para filtrar transportadoras
+                              const compatibleModality = getCompatibleModality(formData.loadingMode);
+                              const carrierModalities = Array.isArray(carrier.modalities) 
+                                ? carrier.modalities 
+                                : (carrier.type ? [carrier.type] : []);
+                              return carrierModalities.includes(compatibleModality);
+                            })
+                            .map((carrier) => {
+                              // Obter modalidades da transportadora
+                              const carrierModalities = Array.isArray(carrier.modalities) 
+                                ? carrier.modalities 
+                                : (carrier.type ? [carrier.type] : []);
+                              
+                              return (
+                                <div key={carrier.id} className="flex items-center space-x-3 p-2 hover:bg-purple-50 rounded">
+                                  <Checkbox
+                                    id={`carrier-${carrier.id}`}
+                                    checked={formData.selectedCarriers.includes(carrier.name)}
+                                    onCheckedChange={(checked) => handleCarrierToggle(carrier.name, checked)}
+                                  />
+                                  <label
+                                    htmlFor={`carrier-${carrier.id}`}
+                                    className="text-sm font-medium cursor-pointer flex-1"
+                                  >
+                                    <div className="flex items-center">
+                                      🚛 <span className="ml-1">{carrier.name}</span>
+                                    </div>
+                                    <span className="text-xs text-gray-500 block">
+                                      {carrierModalities.map(mod => 
+                                        mod === 'paletizados' ? 'Paletizados' : 
+                                        mod === 'bag' ? 'BAG' : 
+                                        mod === 'granel' ? 'Granel' : 
+                                        mod === 'bag_fracionado' ? 'BAG Fracionado' :
+                                        mod === 'paletizados_fracionado' ? 'Paletizados Fracionado' :
+                                        mod
+                                      ).join(', ')}
+                                    </span>
+                                  </label>
+                                </div>
+                              );
+                            })}
+                        </div>
+                      )}
+                    </div>
+                    {formData.selectedCarriers.length > 0 && (
+                      <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg">
+                        <p className="text-sm text-green-700 font-medium">
+                          ✓ {formData.selectedCarriers.length} transportadora(s) selecionada(s):
+                        </p>
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          {formData.selectedCarriers.map((carrierName, index) => (
+                            <Badge key={index} className="bg-green-100 text-green-800">
+                              {carrierName}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Data de Carregamento *
+                  </label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" className="w-full justify-start text-left border-gray-300">
+                        <Calendar className="mr-2 h-4 w-4" />
+                        {formData.loadingDate ? format(formData.loadingDate, 'dd/MM/yyyy', { locale: ptBR }) : 'Selecione a data'}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0">
+                      <CalendarComponent
+                        mode="single"
+                        selected={formData.loadingDate}
+                        onSelect={(date) => handleInputChange('loadingDate', date)}
+                        locale={ptBR}
+                        disabled={(date) => date < new Date().setHours(0, 0, 0, 0)}
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </div>
               </div>
-              <div className="p-4">
-                <img 
-                  src={imagePreview || formData.mapImage} 
-                  alt="Imagem do mapa" 
-                  className="max-w-full max-h-[70vh] object-contain mx-auto"
+
+              {/* Roteiro */}
+              <div className="bg-gray-50 rounded-lg p-4">
+                <h3 className="font-semibold text-gray-800 mb-4">
+                  Roteiro
+                </h3>
+                <Textarea
+                  value={formData.routeInfo}
+                  onChange={(e) => handleInputChange('routeInfo', e.target.value)}
+                  placeholder="Descreva informações adicionais sobre a rota, restrições, observações especiais..."
+                  rows={4}
+                  className="border-gray-300 focus:border-green-500"
                 />
               </div>
+
+              {/* Botão Submit */}
+              <div className="flex justify-center pt-6">
+                <Button
+                  type="submit"
+                  disabled={loading}
+                  className="bg-green-600 hover:bg-green-700 text-white px-12 py-4 text-lg shadow-lg"
+                >
+                  {loading ? (
+                    <div className="flex items-center">
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white mr-3"></div>
+                      Criando Cotação...
+                    </div>
+                  ) : (
+                    <div className="flex items-center">
+                      <Plus className="w-6 h-6 mr-3" />
+                      Criar Cotação
+                    </div>
+                  )}
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+
+        {/* Modal de Preview da Imagem */}
+        {showImagePreview && formData.mapImage && (
+          <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+            <div className="relative max-w-5xl max-h-full">
+              <Button
+                onClick={() => setShowImagePreview(false)}
+                className="absolute -top-4 -right-4 bg-white text-gray-800 hover:bg-gray-100 rounded-full p-3 shadow-lg z-10"
+              >
+                <X className="w-6 h-6" />
+              </Button>
+              <img
+                src={formData.mapImage}
+                alt="Mapa da Rota - Visualização Completa"
+                className="max-w-full max-h-screen object-contain rounded-lg shadow-2xl"
+              />
             </div>
           </div>
         )}
