@@ -1,0 +1,11 @@
+{
+  "watch": ["*.js", "database/*.js", "routes/*.js"],
+  "ext": "js,json",
+  "ignore": ["node_modules/", "uploads/", "*.db"],
+  "exec": "node server.js",
+  "env": {
+    "NODE_ENV": "development",
+    "PORT": "3001"
+  },
+  "delay": "1000"
+}
