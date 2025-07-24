@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { HandshakeIcon, Percent, CheckCircle, DollarSign, Weight, MapPin, FileText, Truck, Route, CalendarDays, Search, ChevronDown, ChevronUp, Info, Send, XCircle, Users, Clock, AlertTriangle, Edit, Trash2, Map, Save, Ban, Upload, Eye, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { FreightMap, Carrier, User, TruckType, UploadFile } from "@/components/ApiDatabase";
@@ -19,6 +18,13 @@ import {
   PopoverTrigger
 } from "@/components/ui/popover";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter
+} from "@/components/ui/dialog";
 
 
 export default function NegotiationPage() {
@@ -37,19 +43,20 @@ export default function NegotiationPage() {
   const [showJustificationModal, setShowJustificationModal] = useState({});
   const [finalizationObservation, setFinalizationObservation] = useState({});
 
-  // Estados para edição da proposta
+  // Estados para edição da proposta (individual)
   const [editingProposalId, setEditingProposalId] = useState(null);
   const [proposalEditData, setProposalEditData] = useState({ mapValue: '', selectedCarrier: '', observation: '' });
   const [originalProposalData, setOriginalProposalData] = useState(null);
 
-  // Estados para edição completa
-  const [editingMapId, setEditingMapId] = useState(null);
-  const [editFormData, setEditFormData] = useState({});
-  const [originalEditData, setOriginalEditData] = useState({}); // For comparing mapValue and selectedCarrier
+  // Estados para edição completa do MAPA (grupo de propostas)
+  const [editingMapId, setEditingMapId] = useState(null); // Will now store the mapNumber
+  const [editFormData, setEditFormData] = useState({}); // Will contain selectedCarriers: []
+  const [originalEditData, setOriginalEditData] = useState(null); // Stores the original map group for comparison
   const [editObservation, setEditObservation] = useState(''); // For observation on map edit
   const [truckTypes, setTruckTypes] = useState([]);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [showImagePreview, setShowImagePreview] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false); // For modal submit button
 
   // NOVOS ESTADOS PARA PAGINAÇÃO E FILTRO DE STATUS
   const [currentPage, setCurrentPage] = useState(1);
@@ -81,7 +88,7 @@ export default function NegotiationPage() {
 
   useEffect(() => {
     loadData();
-  }, []); // Load data only once on mount
+  }, []); 
 
   // Reset current page to 1 when filters change
   useEffect(() => {
@@ -105,36 +112,33 @@ export default function NegotiationPage() {
       let mapsToShow = [];
 
       if (user && user.userType === 'carrier') {
-        // Carriers see freights where they are the selected carrier,
-        // and which are either negotiating, rejected, or contracted by them.
-        const negotiatingMaps = await FreightMap.filter({ status: 'negotiating', selectedCarrier: user.carrierName });
-        const rejectedMaps = await FreightMap.filter({ status: 'rejected', selectedCarrier: user.carrierName });
-        const contractedMaps = await FreightMap.filter({ status: 'contracted', selectedCarrier: user.carrierName });
-        mapsToShow = [...negotiatingMaps, ...rejectedMaps, ...contractedMaps];
-        setStatusFilter('all'); // Carrier should see all their relevant freights by default
+        // Para transportadoras, exibir APENAS os fretes que estão ativamente em negociação.
+        // It's crucial here that a carrier only sees freights *selected for them*
+        const carrierMaps = await FreightMap.filter({ selectedCarrier: user.carrierName });
+        // Filter by status for carrier view, typically negotiating
+        mapsToShow = carrierMaps.filter(map => map.status === 'negotiating' || map.status === 'contracted' || map.status === 'rejected');
+        setStatusFilter('negotiating'); // Define o filtro para corresponder aos dados carregados
       } else {
-        // Admins/Users see all relevant freights for negotiation and review
-        const allNegotiatingMaps = await FreightMap.filter({ status: 'negotiating' });
-        const allContractedMaps = await FreightMap.filter({ status: 'contracted' });
-        const allRejectedMaps = await FreightMap.filter({ status: 'rejected' });
-        mapsToShow = [...allNegotiatingMaps, ...allContractedMaps, ...allRejectedMaps];
-        setStatusFilter('negotiating'); // Default filter to show only negotiating for admins/users
+        // Admins/Users veem todos os fretes para gerenciamento
+        const allMaps = await FreightMap.list();
+        mapsToShow = allMaps;
+        // The status filter will handle which ones are displayed from the full list
       }
 
-      // Sort all maps by creation date, latest first, before setting.
-      // This ensures consistent sorting for grouping and pagination.
+      // Ordena todos os mapas por data de criação, mais recentes primeiro.
       mapsToShow.sort((a, b) => new Date(b.created_date) - new Date(a.created_date));
 
       setFreightMaps(mapsToShow);
       
     } catch (error) {
       console.error("Error loading data:", error);
-      alert("Erro ao carregar dados. Verifique se a API está rodando.");
+      setCurrentUser(null);
+      setFreightMaps([]);
     }
     setLoading(false);
   };
 
-  // Iniciar edição da proposta
+  // Iniciar edição da proposta (individual, triggered by admin/user from a specific proposal card)
   const handleStartProposalEdit = (map) => {
     setEditingProposalId(map.id);
     const data = {
@@ -153,7 +157,7 @@ export default function NegotiationPage() {
     setOriginalProposalData(null);
   };
 
-  // Salvar edição da proposta
+  // Salvar edição da proposta (individual)
   const handleSaveProposalEdit = async (mapId) => {
     const map = freightMaps.find(m => m.id === mapId);
     if (!map) return;
@@ -200,95 +204,163 @@ export default function NegotiationPage() {
     }
   };
 
+  // **** NEW MAP EDIT FUNCTIONS ****
+  const handleEditMapOpen = (mapGroup) => {
+    // mapGroup is [mapNumber, array_of_freight_maps_for_that_number]
+    const mapNumber = mapGroup[0];
+    const freightsInGroup = mapGroup[1];
+    const mainFreight = freightsInGroup[0]; // Assumes common data is consistent across the group
 
-  // Iniciar edição completa
-  const handleStartEdit = (map) => {
-    setEditingMapId(map.id);
-    setEditFormData({
-      mapNumber: map.mapNumber,
-      origin: map.origin,
-      destination: map.destination,
-      totalKm: map.totalKm,
-      weight: map.weight,
-      mapValue: map.mapValue,
-      truckType: map.truckType,
-      selectedCarrier: map.selectedCarrier,
-      loadingMode: map.loadingMode,
-      loadingDate: map.loadingDate ? new Date(map.loadingDate) : null,
-      routeInfo: map.routeInfo || '',
-      mapImage: map.mapImage || '',
-      managers: map.managers || []
-    });
-    setOriginalEditData({
-      mapValue: map.mapValue,
-      selectedCarrier: map.selectedCarrier
-    });
+    const allCarriersForMap = freightsInGroup.map(f => f.selectedCarrier);
+
+    const initialData = {
+      mapNumber: mainFreight.mapNumber,
+      mapImage: mainFreight.mapImage,
+      origin: mainFreight.origin,
+      destination: mainFreight.destination,
+      totalKm: mainFreight.totalKm,
+      weight: mainFreight.weight,
+      mapValue: mainFreight.mapValue,
+      truckType: mainFreight.truckType,
+      loadingMode: mainFreight.loadingMode,
+      loadingDate: mainFreight.loadingDate ? parseISO(mainFreight.loadingDate) : null,
+      routeInfo: mainFreight.routeInfo,
+      managers: mainFreight.managers || [],
+      selectedCarriers: allCarriersForMap, // MÚLTIPLAS TRANSPORTADORAS
+    };
+    
+    setEditingMapId(mapNumber);
+    setEditFormData(initialData);
+    setOriginalEditData({ mapNumber: mapNumber, freights: [...freightsInGroup] }); // Store original map group
     setEditObservation('');
   };
 
-  // Cancelar edição completa
-  const handleCancelEdit = () => {
+  const closeEditMapModal = () => {
     setEditingMapId(null);
     setEditFormData({});
-    setOriginalEditData({});
+    setOriginalEditData(null);
     setEditObservation('');
   };
 
-  // Salvar edição completa
-  const handleSaveEdit = async () => {
-    const valueChanged = parseFloat(editFormData.mapValue) !== parseFloat(originalEditData.mapValue);
-    const carrierChanged = editFormData.selectedCarrier !== originalEditData.selectedCarrier;
-    
-    if ((valueChanged || carrierChanged) && !editObservation.trim()) {
-      alert('A observação é obrigatória ao alterar o valor do frete ou a transportadora.');
+  const handleEditMapDataChange = (field, value) => {
+    setEditFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleCarrierToggleInEdit = (carrierName) => {
+    setEditFormData(prev => {
+        const currentCarriers = prev.selectedCarriers || [];
+        const newSelectedCarriers = currentCarriers.includes(carrierName)
+            ? currentCarriers.filter(c => c !== carrierName)
+            : [...currentCarriers, carrierName];
+        return { ...prev, selectedCarriers: newSelectedCarriers };
+    });
+  };
+
+  const handleEditMapSubmit = async () => {
+    if (!editObservation.trim()) {
+      alert("A justificativa de edição é obrigatória.");
+      return;
+    }
+    if (!editFormData.selectedCarriers || editFormData.selectedCarriers.length === 0) {
+      alert("Selecione pelo menos uma transportadora.");
       return;
     }
 
+    setIsSubmitting(true);
     try {
-      const updateData = {
-        ...editFormData,
-        loadingDate: editFormData.loadingDate ? format(editFormData.loadingDate, 'yyyy-MM-dd') : null,
-        managers: editFormData.managers || [] // Ensure managers is included
-      };
+        const originalFreights = originalEditData.freights;
+        const originalCarriers = originalFreights.map(f => f.selectedCarrier);
+        const newSelectedCarriers = editFormData.selectedCarriers;
 
-      if (valueChanged || carrierChanged) {
-        let details = [];
-        if (valueChanged) {
-          details.push(`Valor alterado de R$ ${originalEditData.mapValue?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} para R$ ${parseFloat(editFormData.mapValue).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`);
-        }
-        if (carrierChanged) {
-          details.push(`Transportadora alterada de "${originalEditData.selectedCarrier}" para "${editFormData.selectedCarrier}"`);
-        }
+        const carriersToAdd = newSelectedCarriers.filter(c => !originalCarriers.includes(c));
+        const carriersToRemove = originalCarriers.filter(c => !newSelectedCarriers.includes(c));
+        const carriersToUpdate = originalCarriers.filter(c => newSelectedCarriers.includes(c));
 
-        const newObservation = {
-          observation: editObservation,
+        const newObservationRecord = {
+          observation: editObservation.trim(),
           user: currentUser.fullName,
-          timestamp: new Date().toISOString(),
-          details: details.join('. ')
+          timestamp: getBrazilIsoNow(),
+          details: 'Edição geral do mapa.'
         };
-        
-        const currentMap = freightMaps.find(m => m.id === editingMapId);
-        updateData.editObservations = [...(currentMap.editObservations || []), newObservation];
-      }
 
-      await FreightMap.update(editingMapId, updateData);
-      alert('Dados atualizados com sucesso!');
-      handleCancelEdit();
-      await loadData();
+        const basePayload = {
+            mapNumber: editFormData.mapNumber,
+            mapImage: editFormData.mapImage,
+            origin: editFormData.origin,
+            destination: editFormData.destination,
+            totalKm: parseInt(editFormData.totalKm),
+            weight: parseFloat(editFormData.weight),
+            mapValue: parseFloat(editFormData.mapValue),
+            truckType: editFormData.truckType,
+            loadingMode: editFormData.loadingMode,
+            loadingDate: editFormData.loadingDate ? format(new Date(editFormData.loadingDate), 'yyyy-MM-dd') : null,
+            routeInfo: editFormData.routeInfo,
+            managers: editFormData.managers || [],
+            updated_date: getBrazilIsoNow()
+        };
+
+        // 1. Adicionar novas transportadoras
+        const creationPromises = carriersToAdd.map(carrierName => {
+            const createPayload = {
+                ...basePayload,
+                selectedCarrier: carrierName,
+                carrierProposals: {}, // New freights start with no proposals
+                status: 'negotiating', // New freights start as negotiating
+                created_date: getBrazilIsoNow(),
+                editObservations: [newObservationRecord] // New observation for this created freight
+            };
+            return FreightMap.create(createPayload);
+        });
+
+        // 2. Remover transportadoras antigas
+        const deletionPromises = carriersToRemove.map(carrierName => {
+            const freightToRemove = originalFreights.find(f => f.selectedCarrier === carrierName);
+            if (freightToRemove) {
+                return FreightMap.delete(freightToRemove.id);
+            }
+            return Promise.resolve();
+        });
+
+        // 3. Atualizar dados para transportadoras existentes
+        const updatePromises = carriersToUpdate.map(carrierName => {
+            const freightToUpdate = originalFreights.find(f => f.selectedCarrier === carrierName);
+            if (freightToUpdate) {
+                const updatePayload = { 
+                  ...basePayload,
+                  // Preserve individual carrier data
+                  carrierProposals: freightToUpdate.carrierProposals,
+                  status: freightToUpdate.status,
+                  selectedCarrier: freightToUpdate.selectedCarrier, // Ensure the selected carrier remains the same
+                  // Append new observation
+                  editObservations: [...(freightToUpdate.editObservations || []), newObservationRecord],
+                };
+                return FreightMap.update(freightToUpdate.id, updatePayload);
+            }
+            return Promise.resolve();
+        });
+
+        await Promise.all([...creationPromises, ...deletionPromises, ...updatePromises]);
+        
+        alert('Mapa atualizado com sucesso!');
+        closeEditMapModal();
+        await loadData();
     } catch (error) {
-      console.error("Erro ao salvar edição:", error);
-      alert("Falha ao salvar. Tente novamente.");
+        console.error("Erro ao atualizar mapa:", error);
+        alert('Falha ao atualizar o mapa.');
+    } finally {
+        setIsSubmitting(false);
     }
   };
+  // **** END NEW MAP EDIT FUNCTIONS ****
 
   // Upload de imagem na edição
-  const handleImageUpload = async (event) => {
+  const handleImageUpload = (event) => {
     const file = event.target.files[0];
     if (!file) return;
 
     setUploadingImage(true);
     try {
-      const { file_url } = await UploadFile({ file });
+      const { file_url } = UploadFile({ file });
       setEditFormData(prev => ({ ...prev, mapImage: file_url }));
     } catch (error) {
       console.error("Error uploading image:", error);
@@ -369,6 +441,7 @@ export default function NegotiationPage() {
           });
         });
 
+        // Aguarda todos os emails serem enviados
         await Promise.all(emailPromises);
         console.log('Emails enviados para administradores com sucesso!');
       } catch (emailError) {
@@ -428,7 +501,7 @@ export default function NegotiationPage() {
 
     // Verificar se não está escolhendo a mais barata
     const isChoosingCheapest = freight.selectedCarrier === lowestCarrier;
-    
+     
     if (!isChoosingCheapest && lowestCarrier && lowestValue !== Infinity) { // Added condition to check if lowestValue is actually found
       // Mostrar modal de justificativa
       setShowJustificationModal(prev => ({ ...prev, [freightId]: true }));
@@ -501,7 +574,7 @@ export default function NegotiationPage() {
                   freight.loadingMode === 'bag_fracionado' ? 'BAG Fracionado' : 
                   'Paletizados Fracionado'
                 }</li>
-                <li><strong>Data de Carregamento:</strong> ${freight.loadingDate ? format(new Date(freight.loadingDate), 'dd/MM/yyyy', { locale: ptBR }) : 'Não informada'}</li>
+                <li><strong>Data de Carregamento:</strong> ${freight.loadingDate ? format(parseISO(freight.loadingDate), 'dd/MM/yyyy', { locale: ptBR }) : 'Não informada'}</li>
               </ul>
             </div>
             
@@ -569,12 +642,15 @@ export default function NegotiationPage() {
               
               <div style="background-color: #fef2f2; padding: 15px; border-radius: 8px; border-left: 4px solid #ef4444; margin: 20px 0;">
                 <h3 style="color: #dc2626; margin-top: 0;">📢 Resultado:</h3>
-                <p style="margin-bottom: 0;"><strong>O frete foi fechado com outra transportadora. Agradecemos a sua participação!</strong></p>
+                <p style="margin-bottom: 0;"><strong>Infelizmente, desta vez outra proposta foi selecionada para esta cotação.</strong></p>
               </div>
               
-              <p>Agradecemos sua participação no processo de cotação. Continue participando de nossas próximas oportunidades!</p>
+              <div style="background-color: #f0f9ff; padding: 15px; border-radius: 8px; border-left: 4px solid #3b82f6; margin: 20px 0;">
+                <h3 style="color: #1d4ed8; margin-top: 0;">💪 Não desanime!</h3>
+                <p style="margin-bottom: 0;">Continue participando de nossas cotações. Cada experiência nos ajuda a melhorar e encontrar as melhores oportunidades para sua transportadora!</p>
+              </div>
               
-              <p>🚛 <strong>Acompanhe novas cotações no sistema e continue crescendo conosco!</strong></p>
+              <p>🚛 <strong>Fique atento às próximas cotações no sistema!</strong></p>
               
               <p>Atenciosamente,<br>Equipe UnionAgro</p>
             `;
@@ -704,10 +780,15 @@ export default function NegotiationPage() {
   };
 
   const handleDeleteFreight = async (freightId, mapNumber) => {
-    if (window.confirm(`Tem certeza que deseja excluir permanentemente o mapa ${mapNumber}? Esta ação é irreversível.`)) {
+    // Busca todos os fretes com o mesmo número de mapa
+    const mapsToDelete = freightMaps.filter(f => f.mapNumber === mapNumber);
+    
+    if (window.confirm(`Tem certeza que deseja excluir permanentemente o mapa ${mapNumber} e TODAS as suas ${mapsToDelete.length} propostas associadas? Esta ação é irreversível.`)) {
       try {
-        await FreightMap.delete(freightId);
-        alert(`Mapa ${mapNumber} excluído com sucesso.`);
+        // Deleta todos os fretes associados em paralelo
+        await Promise.all(mapsToDelete.map(map => FreightMap.delete(map.id)));
+        
+        alert(`Mapa ${mapNumber} e todas as suas propostas foram excluídos com sucesso.`);
         await loadData();
       } catch (error) {
         console.error("Erro ao excluir frete:", error);
@@ -740,7 +821,7 @@ export default function NegotiationPage() {
           mapNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
           (mainFreightForFilters.origin && mainFreightForFilters.origin.toLowerCase().includes(searchTerm.toLowerCase())) ||
           (mainFreightForFilters.destination && mainFreightForFilters.destination.toLowerCase().includes(searchTerm.toLowerCase())) ||
-          (mainFreightForFilters.selectedCarrier && mainFreightForFilters.selectedCarrier.toLowerCase().includes(searchTerm.toLowerCase()));
+          group.some(f => f.selectedCarrier && f.selectedCarrier.toLowerCase().includes(searchTerm.toLowerCase()));
 
         const statusMatch = statusFilter === 'all' || 
           (statusFilter === 'with_proposals' && group.some(f => f.carrierProposals && Object.keys(f.carrierProposals).length > 0)) ||
@@ -806,8 +887,6 @@ export default function NegotiationPage() {
         return 'bg-green-100 text-green-800';
       case 'rejected':
         return 'bg-red-100 text-red-800';
-      case 'pending':
-        return 'bg-yellow-100 text-yellow-800';
       default:
         return 'bg-gray-100 text-gray-800';
     }
@@ -820,28 +899,20 @@ export default function NegotiationPage() {
       case 'contracted':
         return 'Contratado';
       case 'rejected':
-        return 'Rejeitado';
-      case 'pending':
-        return 'Pendente';
+        return 'Encerrado';
       default:
-        return status;
+        return 'Desconhecido';
     }
   };
 
-  const getModalityText = (loadingMode) => {
-    switch (loadingMode) {
-      case 'paletizados':
-        return '📦 Paletizados';
-      case 'bag':
-        return '🎒 BAG';
-      case 'granel':
-        return '🌾 Granel';
-      case 'bag_fracionado':
-        return '🎒 BAG Fracionado';
-      case 'paletizados_fracionado':
-        return '📦 Paletizados Fracionado';
-      default:
-        return loadingMode;
+  const getModalityText = (modality) => {
+    switch (modality) {
+      case 'paletizados': return '📦 Paletizados';
+      case 'bag': return '🎒 BAG';
+      case 'granel': return '🌾 Granel';
+      case 'bag_fracionado': return '🎒 BAG Fracionado';
+      case 'paletizados_fracionado': return '📦 Paletizados Fracionado';
+      default: return modality;
     }
   };
 
@@ -849,7 +920,8 @@ export default function NegotiationPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-[calc(100vh-200px)]">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <p className="ml-4 text-lg text-gray-600">Carregando negociações...</p>
       </div>
     );
   }
@@ -943,7 +1015,7 @@ export default function NegotiationPage() {
                           <Badge className="bg-purple-100 text-purple-800 text-xs">
                             {getModalityText(firstMap.loadingMode)}
                           </Badge>
-                          {groupHasNewProposals && (
+                          {groupHasNewProposals && firstMap.status === 'negotiating' && (
                             <Badge className="bg-green-100 text-green-800 text-xs animate-pulse">
                               ✨ Nova Proposta
                             </Badge>
@@ -962,18 +1034,18 @@ export default function NegotiationPage() {
                       </div>
                       
                       <div className="flex flex-col md:flex-row gap-2">
-                        {currentUser?.userType !== 'carrier' && firstMap.status === 'negotiating' && editingMapId !== firstMap.id && (
+                        {currentUser?.userType !== 'carrier' && editingMapId !== mapNumber && ( 
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => handleStartEdit(firstMap)}
+                            onClick={() => handleEditMapOpen([mapNumber, mapsInGroup])} 
                             className="bg-blue-600 text-white hover:bg-blue-700 shrink-0"
                           >
                             <Edit className="w-4 h-4 mr-2" />
                             Editar Mapa
                           </Button>
                         )}
-                        {currentUser && currentUser.userType !== 'carrier' && (
+                        {currentUser && currentUser.userType === 'admin' && (
                           <Button
                             variant="destructive"
                             size="sm"
@@ -989,271 +1061,6 @@ export default function NegotiationPage() {
                   </CardHeader>
 
                 <CardContent className="p-4 md:p-6 space-y-6">
-                  {/* FORMULÁRIO DE EDIÇÃO COMPLETA */}
-                  {editingMapId === firstMap.id && (
-                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 mb-6">
-                      <h4 className="font-semibold text-yellow-800 mb-4 flex items-center">
-                        <Edit className="w-5 h-5 mr-2" />
-                        Editando Mapa {firstMap.mapNumber}
-                      </h4>
-                      
-                      <div className="space-y-6">
-                        {/* Identificação */}
-                        <div className="bg-white rounded-lg p-4">
-                          <h5 className="font-medium text-gray-800 mb-3">Identificação</h5>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                              <Label htmlFor="edit-mapNumber">Número do Mapa</Label>
-                              <Input
-                                id="edit-mapNumber"
-                                value={editFormData.mapNumber || ''}
-                                onChange={(e) => setEditFormData(prev => ({ ...prev, mapNumber: e.target.value }))}
-                              />
-                            </div>
-                            <div>
-                              <Label htmlFor="edit-loadingMode">Modalidade</Label>
-                              <Select value={editFormData.loadingMode} onValueChange={(value) => setEditFormData(prev => ({ ...prev, loadingMode: value, truckType: '' }))}>
-                                <SelectTrigger id="edit-loadingMode">
-                                  <SelectValue placeholder="Selecione a modalidade" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="paletizados">📦 Paletizados</SelectItem>
-                                  <SelectItem value="bag">🎒 BAG</SelectItem>
-                                  <SelectItem value="granel">🌾 Granel</SelectItem>
-                                  <SelectItem value="bag_fracionado">🎒 BAG Fracionado</SelectItem>
-                                  <SelectItem value="paletizados_fracionado">📦 Paletizados Fracionado</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Imagem do Mapa */}
-                        <div className="bg-white rounded-lg p-4">
-                          <h5 className="font-medium text-gray-800 mb-3">Imagem do Mapa</h5>
-                          {!editFormData.mapImage ? (
-                            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
-                              <div className="relative">
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  onChange={handleImageUpload}
-                                  disabled={uploadingImage}
-                                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                />
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  disabled={uploadingImage}
-                                  className="pointer-events-none"
-                                >
-                                  {uploadingImage ? (
-                                    <>
-                                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-600 mr-2"></div>
-                                      Enviando...
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Upload className="w-4 h-4 mr-2" />
-                                      Escolher Imagem
-                                    </>
-                                  )}
-                                </Button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="space-y-2">
-                              <img
-                                src={editFormData.mapImage}
-                                alt="Mapa da Rota"
-                                className="w-full h-48 object-contain rounded border"
-                              />
-                              <div className="flex gap-2">
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  onClick={() => setShowImagePreview(true)}
-                                  variant="outline"
-                                >
-                                  <Eye className="w-4 h-4 mr-1" />
-                                  Ver
-                                </Button>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={removeEditImage}
-                                  className="text-red-600"
-                                >
-                                  <X className="w-4 h-4 mr-1" />
-                                  Remover
-                                </Button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Rota */}
-                        <div className="bg-white rounded-lg p-4">
-                          <h5 className="font-medium text-gray-800 mb-3">Informações da Rota</h5>
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div>
-                              <Label htmlFor="edit-origin">Origem</Label>
-                              <Input
-                                id="edit-origin"
-                                value={editFormData.origin || ''}
-                                onChange={(e) => setEditFormData(prev => ({ ...prev, origin: e.target.value }))}
-                              />
-                            </div>
-                            <div>
-                              <Label htmlFor="edit-destination">Destino</Label>
-                              <Input
-                                id="edit-destination"
-                                value={editFormData.destination || ''}
-                                onChange={(e) => setEditFormData(prev => ({ ...prev, destination: e.target.value }))}
-                              />
-                            </div>
-                            <div>
-                              <Label htmlFor="edit-totalKm">Distância (km)</Label>
-                              <Input
-                                id="edit-totalKm"
-                                type="number"
-                                value={editFormData.totalKm || ''}
-                                onChange={(e) => setEditFormData(prev => ({ ...prev, totalKm: parseInt(e.target.value) || 0 }))}
-                              />
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Carga e Valores */}
-                        <div className="bg-white rounded-lg p-4">
-                          <h5 className="font-medium text-gray-800 mb-3">Carga e Valores</h5>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                              <Label htmlFor="edit-weight">Peso (kg)</Label>
-                              <Input
-                                id="edit-weight"
-                                type="number"
-                                step="0.01"
-                                value={editFormData.weight || ''}
-                                onChange={(e) => {
-                                  if (e.target.value.length > 9) return;
-                                  setEditFormData(prev => ({ ...prev, weight: parseFloat(e.target.value) || 0 }))
-                                }}
-                              />
-                            </div>
-                            <div>
-                              <Label htmlFor="edit-mapValue">Valor do Frete (R$)</Label>
-                              <Input
-                                id="edit-mapValue"
-                                type="number"
-                                step="0.01"
-                                value={editFormData.mapValue || ''}
-                                onChange={(e) => {
-                                  if (e.target.value.length > 9) return;
-                                  setEditFormData(prev => ({ ...prev, mapValue: parseFloat(e.target.value) || 0 }))
-                                }}
-                                className="font-semibold"
-                              />
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Transporte */}
-                        <div className="bg-white rounded-lg p-4">
-                          <h5 className="font-medium text-gray-800 mb-3">Informações de Transporte</h5>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                            <div>
-                              <Label htmlFor="edit-selectedCarrier">Transportadora</Label>
-                              <Select value={editFormData.selectedCarrier} onValueChange={(value) => setEditFormData(prev => ({ ...prev, selectedCarrier: value }))}>
-                                <SelectTrigger id="edit-selectedCarrier">
-                                  <SelectValue placeholder="Selecione a transportadora" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {carriers.filter(c => c.active).map(carrier => (
-                                    <SelectItem key={carrier.id} value={carrier.name}>
-                                      🚛 {carrier.name}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div>
-                              <Label htmlFor="edit-truckType">Tipo de Caminhão</Label>
-                              <Select value={editFormData.truckType} onValueChange={(value) => setEditFormData(prev => ({ ...prev, truckType: value }))}>
-                                <SelectTrigger id="edit-truckType">
-                                  <SelectValue placeholder="Selecione o tipo" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {getFilteredTruckTypes(editFormData.loadingMode).map(truck => (
-                                    <SelectItem key={truck.id} value={truck.name}>
-                                      {truck.name} ({truck.capacity}t)
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-                          <div>
-                            <Label htmlFor="edit-loadingDate">Data de Carregamento</Label>
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <Button variant="outline" className="w-full justify-start">
-                                  <CalendarDays className="mr-2 h-4 w-4" />
-                                  {editFormData.loadingDate ? format(editFormData.loadingDate, 'dd/MM/yyyy', { locale: ptBR }) : 'Selecione a data'}
-                                </Button>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-auto p-0">
-                                <CalendarComponent
-                                  mode="single"
-                                  selected={editFormData.loadingDate}
-                                  onSelect={(date) => setEditFormData(prev => ({ ...prev, loadingDate: date }))}
-                                  locale={ptBR}
-                                />
-                              </PopoverContent>
-                            </Popover>
-                          </div>
-                        </div>
-
-                        {/* Observações */}
-                        <div className="bg-white rounded-lg p-4">
-                          <h5 className="font-medium text-gray-800 mb-3">Observações</h5>
-                          <Textarea
-                            placeholder="Informações adicionais sobre a rota..."
-                            value={editFormData.routeInfo || ''}
-                            onChange={(e) => setEditFormData(prev => ({ ...prev, routeInfo: e.target.value }))}
-                            rows={3}
-                          />
-                        </div>
-
-                        {/* Observação da Edição */}
-                        <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-                          <Label htmlFor="edit-observation">Observação da Edição *</Label>
-                          <p className="text-sm text-orange-700 mb-2">Obrigatória se alterar transportadora ou valor do frete</p>
-                          <Textarea
-                            id="edit-observation"
-                            placeholder="Descreva o motivo das alterações..."
-                            value={editObservation}
-                            onChange={(e) => setEditObservation(e.target.value)}
-                            rows={3}
-                          />
-                        </div>
-
-                        {/* Botões */}
-                        <div className="flex gap-3 justify-end">
-                          <Button variant="outline" onClick={handleCancelEdit}>
-                            <Ban className="w-4 h-4 mr-2" />
-                            Cancelar
-                          </Button>
-                          <Button onClick={handleSaveEdit} className="bg-blue-600 hover:bg-blue-700">
-                            <Save className="w-4 h-4 mr-2" />
-                            Salvar Alterações
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
                   {/* Informações da Rota */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center md:text-left">
                       <div className="p-3 bg-gray-50 rounded-lg">
@@ -1325,7 +1132,7 @@ export default function NegotiationPage() {
                         {mapsInGroup.map((map) => (
                             <div key={map.id} className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
                                 { editingProposalId === map.id ? (
-                                  // FORMULÁRIO DE EDIÇÃO DA PROPOSTA
+                                  // FORMULÁRIO DE EDIÇÃO DA PROPOSTA (INDIVIDUAL)
                                   <div className="space-y-4">
                                     <h5 className="font-semibold text-gray-800">Editando Proposta para {map.selectedCarrier}</h5>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1337,7 +1144,7 @@ export default function NegotiationPage() {
                                         >
                                           <SelectTrigger id="edit-carrier"><SelectValue placeholder="Selecione a transportadora"/></SelectTrigger>
                                           <SelectContent>
-                                            {carriers.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
+                                            {carriers.filter(c => c.active).map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
                                           </SelectContent>
                                         </Select>
                                       </div>
@@ -1398,7 +1205,7 @@ export default function NegotiationPage() {
                                         </h6>
                                       </div>
                                       <p className="text-sm text-orange-700 mb-3">
-                                        Você está escolhendo {map.selectedCarrier} (R$ {map.carrierProposals?.[map.selectedCarrier]?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}) 
+                                        Você está escolhendo {map.selectedCarrier} (R$ {userCounterProposal[map.id]?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}) 
                                         ao invés da menor proposta de {lowestCarrier} (R$ {lowestValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}). 
                                         Por favor, justifique esta decisão:
                                       </p>
@@ -1544,11 +1351,11 @@ export default function NegotiationPage() {
                         <div>
                           <p className="text-xs text-gray-500 mb-1 mt-4">Histórico de Edições</p>
                           <div className="space-y-2">
-                            {firstMap.editObservations.map((obs, i) => (
+                            {firstMap.editObservations.slice().reverse().map((obs, i) => (
                               <div key={i} className="text-sm bg-yellow-50 p-3 rounded-lg border border-yellow-200">
                                 <p className="font-semibold">{obs.details}</p>
                                 <p className="italic text-gray-700">"{obs.observation}"</p>
-                                <p className="text-xs text-gray-500 mt-1"> - {obs.user} em {format(new Date(obs.timestamp), 'dd/MM/yyyy HH:mm', { locale: ptBR })}</p>
+                                <p className="text-xs text-gray-500 mt-1"> - {obs.user} em {formatToBrazilTime(obs.timestamp)}</p>
                               </div>
                             ))}
                           </div>
@@ -1627,6 +1434,290 @@ export default function NegotiationPage() {
             />
           </div>
         </div>
+      )}
+
+      {/* Modal de Edição Completa do Mapa */}
+      {editingMapId && (
+          <Dialog open={!!editingMapId} onOpenChange={closeEditMapModal}>
+              <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+                  <DialogHeader>
+                      <DialogTitle>Editar Mapa - {editFormData.mapNumber}</DialogTitle>
+                  </DialogHeader>
+                  {editFormData && Object.keys(editFormData).length > 0 ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-4">
+                        {/* Identificação */}
+                        <div className="md:col-span-2 bg-white rounded-lg p-4 border border-gray-200">
+                          <h5 className="font-medium text-gray-800 mb-3">Identificação do Mapa</h5>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <Label htmlFor="edit-mapNumber">Número do Mapa</Label>
+                              <Input
+                                id="edit-mapNumber"
+                                value={editFormData.mapNumber || ''}
+                                onChange={(e) => handleEditMapDataChange('mapNumber', e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <Label htmlFor="edit-loadingMode">Modalidade</Label>
+                              <Select value={editFormData.loadingMode} onValueChange={(value) => handleEditMapDataChange('loadingMode', value)}>
+                                <SelectTrigger id="edit-loadingMode">
+                                  <SelectValue placeholder="Selecione a modalidade" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="paletizados">📦 Paletizados</SelectItem>
+                                  <SelectItem value="bag">🎒 BAG</SelectItem>
+                                  <SelectItem value="granel">🌾 Granel</SelectItem>
+                                  <SelectItem value="bag_fracionado">🎒 BAG Fracionado</SelectItem>
+                                  <SelectItem value="paletizados_fracionado">📦 Paletizados Fracionado</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Imagem do Mapa */}
+                        <div className="md:col-span-2 bg-white rounded-lg p-4 border border-gray-200">
+                          <h5 className="font-medium text-gray-800 mb-3">Imagem do Mapa</h5>
+                          {!editFormData.mapImage ? (
+                            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                              <div className="relative">
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={handleImageUpload}
+                                  disabled={uploadingImage}
+                                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                />
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  disabled={uploadingImage}
+                                  className="pointer-events-none"
+                                >
+                                  {uploadingImage ? (
+                                    <>
+                                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-600 mr-2"></div>
+                                      Enviando...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Upload className="w-4 h-4 mr-2" />
+                                      Escolher Imagem
+                                    </>
+                                  )}
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              <img
+                                src={editFormData.mapImage}
+                                alt="Mapa da Rota"
+                                className="w-full h-48 object-contain rounded border"
+                              />
+                              <div className="flex gap-2">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  onClick={() => setShowImagePreview(true)}
+                                  variant="outline"
+                                >
+                                  <Eye className="w-4 h-4 mr-1" />
+                                  Ver
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={removeEditImage}
+                                  className="text-red-600"
+                                >
+                                  <X className="w-4 h-4 mr-1" />
+                                  Remover
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Rota */}
+                        <div className="md:col-span-2 bg-white rounded-lg p-4 border border-gray-200">
+                          <h5 className="font-medium text-gray-800 mb-3">Informações da Rota</h5>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                              <Label htmlFor="edit-origin">Origem</Label>
+                              <Input
+                                id="edit-origin"
+                                value={editFormData.origin || ''}
+                                onChange={(e) => handleEditMapDataChange('origin', e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <Label htmlFor="edit-destination">Destino</Label>
+                              <Input
+                                id="edit-destination"
+                                value={editFormData.destination || ''}
+                                onChange={(e) => handleEditMapDataChange('destination', e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <Label htmlFor="edit-totalKm">Distância (km)</Label>
+                              <Input
+                                id="edit-totalKm"
+                                type="number"
+                                value={editFormData.totalKm || ''}
+                                onChange={(e) => handleEditMapDataChange('totalKm', parseInt(e.target.value) || 0)}
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Carga e Valores */}
+                        <div className="md:col-span-2 bg-white rounded-lg p-4 border border-gray-200">
+                          <h5 className="font-medium text-gray-800 mb-3">Carga e Valores</h5>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <Label htmlFor="edit-weight">Peso (kg)</Label>
+                              <Input
+                                id="edit-weight"
+                                type="number"
+                                step="0.01"
+                                value={editFormData.weight || ''}
+                                onChange={(e) => {
+                                  if (e.target.value.length > 9) return;
+                                  handleEditMapDataChange('weight', parseFloat(e.target.value) || 0)
+                                }}
+                              />
+                            </div>
+                            <div>
+                              <Label htmlFor="edit-mapValue">Valor do Frete (R$)</Label>
+                              <Input
+                                id="edit-mapValue"
+                                type="number"
+                                step="0.01"
+                                value={editFormData.mapValue || ''}
+                                onChange={(e) => {
+                                  if (e.target.value.length > 9) return;
+                                  handleEditMapDataChange('mapValue', parseFloat(e.target.value) || 0)
+                                }}
+                                className="font-semibold"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Transporte */}
+                        <div className="md:col-span-2 bg-white rounded-lg p-4 border border-gray-200">
+                          <h5 className="font-medium text-gray-800 mb-3">Informações de Transporte</h5>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                            <div>
+                              <Label htmlFor="edit-truckType">Tipo de Caminhão</Label>
+                              <Select value={editFormData.truckType} onValueChange={(value) => handleEditMapDataChange('truckType', value)}>
+                                <SelectTrigger id="edit-truckType">
+                                  <SelectValue placeholder="Selecione o tipo" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {getFilteredTruckTypes(editFormData.loadingMode).map(truck => (
+                                    <SelectItem key={truck.id} value={truck.name}>
+                                      {truck.name} ({truck.capacity}t)
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div>
+                              <Label htmlFor="edit-loadingDate">Data de Carregamento</Label>
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <Button variant="outline" className="w-full justify-start">
+                                    <CalendarDays className="mr-2 h-4 w-4" />
+                                    {editFormData.loadingDate ? format(editFormData.loadingDate, 'dd/MM/yyyy', { locale: ptBR }) : 'Selecione a data'}
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto p-0">
+                                  <CalendarComponent
+                                    mode="single"
+                                    selected={editFormData.loadingDate}
+                                    onSelect={(date) => handleEditMapDataChange('loadingDate', date)}
+                                    locale={ptBR}
+                                  />
+                                </PopoverContent>
+                              </Popover>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Transportadoras */}
+                        <div className="md:col-span-2 bg-white rounded-lg p-4 border border-gray-200">
+                          <Label>Transportadoras* (Selecione uma ou mais)</Label>
+                          <div className="border rounded-lg p-4 mt-2 bg-white max-h-48 overflow-y-auto border-gray-300">
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                              {carriers
+                                .filter(carrier => carrier.active)
+                                .map((carrier) => (
+                                  <div key={carrier.id} className="flex items-center space-x-3 p-2 hover:bg-gray-100 rounded">
+                                    <input
+                                      type="checkbox"
+                                      id={`edit-carrier-${carrier.id}`}
+                                      checked={(editFormData.selectedCarriers || []).includes(carrier.name)}
+                                      onChange={() => handleCarrierToggleInEdit(carrier.name)}
+                                      className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                                    />
+                                    <label
+                                      htmlFor={`edit-carrier-${carrier.id}`}
+                                      className="text-sm font-medium cursor-pointer flex-1"
+                                    >
+                                      {carrier.name}
+                                    </label>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Observações */}
+                        <div className="md:col-span-2 bg-white rounded-lg p-4 border border-gray-200">
+                          <h5 className="font-medium text-gray-800 mb-3">Observações da Rota</h5>
+                          <Textarea
+                            placeholder="Informações adicionais sobre a rota..."
+                            value={editFormData.routeInfo || ''}
+                            onChange={(e) => handleEditMapDataChange('routeInfo', e.target.value)}
+                            rows={3}
+                          />
+                        </div>
+
+                        {/* Observação da Edição */}
+                        <div className="md:col-span-2 bg-orange-50 border border-orange-200 rounded-lg p-4">
+                          <Label htmlFor="edit-observation">Observação da Edição *</Label>
+                          <p className="text-sm text-orange-700 mb-2">Obrigatória para salvar as alterações do mapa.</p>
+                          <Textarea
+                            id="edit-observation"
+                            placeholder="Descreva o motivo das alterações..."
+                            value={editObservation}
+                            onChange={(e) => setEditObservation(e.target.value)}
+                            rows={3}
+                          />
+                        </div>
+                      </div>
+                  ) : <p>Carregando dados...</p>}
+                  <DialogFooter className="pt-4">
+                      <Button variant="outline" onClick={closeEditMapModal}><Ban className="w-4 h-4 mr-2" />Cancelar</Button>
+                      <Button onClick={handleEditMapSubmit} disabled={isSubmitting} className="bg-blue-600 hover:bg-blue-700">
+                          {isSubmitting ? (
+                              <>
+                                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                                  Salvando...
+                              </>
+                          ) : (
+                              <>
+                                  <Save className="w-4 h-4 mr-2" />
+                                  Salvar Alterações
+                              </>
+                          )}
+                      </Button>
+                  </DialogFooter>
+              </DialogContent>
+          </Dialog>
       )}
     </div>
   );

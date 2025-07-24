@@ -1,7 +1,6 @@
 
 // API Database - Conecta com a API Express
-const API_BASE_URL = 'http://10.0.2.4:3001/api';
-
+const API_BASE_URL = 'http://localhost:3001/api';
 
 class ApiDatabase {
     async request(endpoint, options = {}) {
@@ -125,6 +124,7 @@ export class ApiEntity {
 export const FreightMap = new ApiEntity('freight-maps');
 export const TruckType = new ApiEntity('truck-types');
 export const Carrier = new ApiEntity('carriers');
+export const City = new ApiEntity('cities'); // ✅ ADICIONADO: Entidade para buscar cidades
 
 // Enhanced User entity with authentication
 export const User = {

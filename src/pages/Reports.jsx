@@ -61,15 +61,35 @@ export default function ReportsPage() {
 
     loadData();
   }, []);
+
+  // ✅ FUNÇÃO ATUALIZADA: Agrupa fretes por mapNumber para exibir apenas um por mapa
+  const getUniqueFreightsByMap = (freights) => {
+    const uniqueFreights = [];
+    const seenMaps = new Set();
+
+    freights.forEach(freight => {
+      if (!seenMaps.has(freight.mapNumber)) {
+        seenMaps.add(freight.mapNumber);
+        uniqueFreights.push(freight);
+      }
+    });
+
+    return uniqueFreights;
+  };
   
   const processMapData = (freights) => {
+    // Usa fretes únicos para processamento do mapa
+    const uniqueFreights = getUniqueFreightsByMap(freights);
+    
     const stateCounts = {};
-    freights.forEach(freight => {
-      const originState = freight.origin?.split('/')?.[1]?.toUpperCase().trim();
+    uniqueFreights.forEach(freight => {
+      // Conta apenas o estado de DESTINO
       const destState = freight.destination?.split('/')?.[1]?.toUpperCase().trim();
-      if (originState) stateCounts[originState] = (stateCounts[originState] || 0) + 1;
-      if (destState) stateCounts[destState] = (stateCounts[destState] || 0) + 1;
+      if (destState) {
+        stateCounts[destState] = (stateCounts[destState] || 0) + 1;
+      }
     });
+
     const dataForMap = [['State', 'Fretes']];
     for (const state in stateCounts) {
       if (state.length === 2) dataForMap.push([`BR-${state}`, stateCounts[state]]);
@@ -105,7 +125,8 @@ export default function ReportsPage() {
   };
 
   const getFilteredFreights = () => {
-    return freightMaps.filter(freight => {
+    // ✅ ATUALIZADO: Primeiro aplica os filtros, depois pega apenas um por mapa
+    const filtered = freightMaps.filter(freight => {
       const matchesStatus = statusFilter === 'all' || freight.status === statusFilter;
       const matchesModality = modalityFilter === 'all' || freight.loadingMode === modalityFilter;
       const matchesSearch = !searchTerm || (
@@ -120,16 +141,18 @@ export default function ReportsPage() {
       
       return matchesStatus && matchesModality && matchesSearch && matchesState;
     });
+
+    // ✅ NOVO: Retorna apenas fretes únicos por mapa
+    return getUniqueFreightsByMap(filtered);
   };
 
   const downloadCSV = () => {
     const csvContent = [
-      ['Mapa', 'Origem', 'Destino', 'Transportadora', 'Status', 'Modalidade', 'Valor Final', 'Data Criação'],
+      ['Mapa', 'Origem', 'Destino', 'Status', 'Modalidade', 'Valor Final', 'Data Criação'],
       ...filteredFreights.map(freight => [
         freight.mapNumber || '',
         freight.origin || '',
         freight.destination || '',
-        freight.selectedCarrier || '',
         freight.status || '',
         freight.loadingMode || '',
         freight.finalValue ? `R$ ${freight.finalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : '',
@@ -146,17 +169,18 @@ export default function ReportsPage() {
 
   const filteredFreights = getFilteredFreights();
   
-  // ✅ O modal agora usa a mesma lógica de filtro, mas sem o termo de busca geral
+  // ✅ ATUALIZADO: O modal agora também usa fretes únicos
   const modalFreights = selectedState 
-    ? freightMaps.filter(f => {
+    ? getUniqueFreightsByMap(freightMaps.filter(f => {
         const destinationState = f.destination?.split('/')?.[1]?.toUpperCase().trim();
         const matchesState = destinationState === selectedState;
         const matchesStatus = statusFilter === 'all' || f.status === statusFilter;
         const matchesModality = modalityFilter === 'all' || f.loadingMode === modalityFilter;
         return matchesState && matchesStatus && matchesModality;
-      })
+      }))
     : [];
 
+  // ✅ ATUALIZADO: Summary data agora usa fretes únicos
   const summaryData = {
     totalFreights: filteredFreights.length,
     totalValueContracted: filteredFreights

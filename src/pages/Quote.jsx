@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { FileText, Plus, MapPin, Weight, DollarSign, Calendar, Truck, Route, Upload, Image as ImageIcon, Eye, X, CheckCircle, Users } from "lucide-react";
-import { FreightMap, TruckType, Carrier, UploadFile, User } from "@/components/ApiDatabase";
+import { FileText, Plus, MapPin, Weight, DollarSign, Calendar, Truck, Route, Upload, Image as ImageIcon, Eye, X, CheckCircle, Users, Loader2, Map, ChevronDown } from "lucide-react";
+import { FreightMap, TruckType, Carrier, User, UploadFile } from "@/components/ApiDatabase";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -19,15 +19,21 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { getBrazilIsoNow } from '../utils/getBrazilIsoNow';
 import { sendEmail } from '../utils/sendEmail';
+import RouteMapComponent from '../components/RouteMapComponent';
 
-// Opções pré-definidas para o campo Gerente - ✅ ADICIONADO VENDA DIRETA
+// IMPORTANDO DADOS LOCAIS
+import { states as statesData } from '../components/data/states';
+import { cities as allCitiesData } from '../components/data/cities';
+
+// Opções pré-definidas para o campo Gerente
 const managerOptions = ["TIAGO LOPES TOLENTINO", "CLAUDIO FEUSER", "DIEGO JOSÉ MANIAS MARSÃO", "VENDA DIRETA"];
 
 export default function QuotePage() {
   const [formData, setFormData] = useState({
     mapNumber: '',
     origin: 'Pederneiras/SP', // Valor fixo pré-definido
-    destination: '',
+    destinationState: '', // Novo campo para o estado de destino
+    destinationCity: '', // Novo campo para a cidade de destino
     totalKm: '',
     weight: '',
     mapValue: '',
@@ -49,38 +55,151 @@ export default function QuotePage() {
   const [managerFields, setManagerFields] = useState([{ gerente: '', valor: '' }]);
   const [currentUser, setCurrentUser] = useState(null);
 
+  // Novos estados para seleção de destino e cálculo de rota
+  const [states, setStates] = useState([]);
+  const [cities, setCities] = useState([]);
+
+  // NOVOS ESTADOS para a integração com OpenRouteService
+  const [routeData, setRouteData] = useState(null);
+  const [routeLoading, setRouteLoading] = useState(false);
+  const [routeError, setRouteError] = useState(''); // Initialize with empty string
+
+  const [showRouteMap, setShowRouteMap] = useState(false);
+
   useEffect(() => {
-    loadTruckTypesAndCarriers();
+    // Efeito para carregar dados iniciais (agora só para Transportadoras e Tipos de Caminhão)
+    const loadInitialData = async () => {
+      try {
+        const [truckData, carrierData] = await Promise.all([
+          TruckType.list(),
+          Carrier.list()
+        ]);
+        setTruckTypes(truckData);
+        setCarriers(carrierData.filter(c => c.active));
+        // CARREGANDO ESTADOS DO ARQUIVO LOCAL
+        setStates(statesData.sort((a, b) => a.Nome.localeCompare(b.Nome)));
+      } catch (error) {
+        console.error("Erro ao buscar dados iniciais:", error);
+        alert("Erro ao carregar dados iniciais.");
+      }
+    };
+    loadInitialData();
+
     const fetchUser = async () => {
       try {
         const user = await User.me();
         setCurrentUser(user);
       } catch (error) {
         console.error("Não foi possível buscar o usuário:", error);
-        setCurrentUser({ userType: 'admin' }); // Fallback para admin em caso de erro na busca
+        setCurrentUser({ userType: 'admin' });
       }
     };
     fetchUser();
   }, []);
 
-  const loadTruckTypesAndCarriers = async () => {
+  // Efeito para buscar cidades quando o estado muda (agora filtra do arquivo local)
+  useEffect(() => {
+    if (formData.destinationState) {
+      // FILTRANDO CIDADES DO ARQUIVO LOCAL
+      const filteredCities = allCitiesData.filter(
+        city => city.Estado == formData.destinationState
+      );
+      setCities(filteredCities.sort((a, b) => a.Nome.localeCompare(b.Nome)));
+    } else {
+      setCities([]); // Limpa as cidades se nenhum estado estiver selecionado
+    }
+    // Reseta a cidade selecionada quando o estado muda
+    handleInputChange('destinationCity', '');
+  }, [formData.destinationState]);
+
+  // NOVO useEffect para calcular rota quando origem e destino mudarem
+  useEffect(() => {
+    if (formData.destinationCity && formData.destinationState) {
+      calculateRouteWithMap();
+    } else {
+      setRouteData(null);
+      setRouteError('');
+      handleInputChange('totalKm', '');
+      setShowRouteMap(false); // Hide map if destination is not fully selected
+    }
+  }, [formData.destinationCity, formData.destinationState, states]); // Depende de 'states' para garantir que o nome do estado está disponível
+
+  // NOVA FUNÇÃO: Calcular rota com OpenRouteService - CORRIGIDA
+  const calculateRouteWithMap = async () => {
+    if (!formData.destinationCity || !formData.destinationState) return;
+
+    setRouteLoading(true);
+    setRouteError('');
+
     try {
-      const trucks = await TruckType.list();
-      const carriersList = await Carrier.list();
-      setTruckTypes(trucks);
-      setCarriers(carriersList);
+      const selectedStateObj = states.find(s => s.ID == formData.destinationState);
+      if (!selectedStateObj) {
+        setRouteError('Estado inválido selecionado. Não foi possível calcular a rota.');
+        setRouteLoading(false);
+        return;
+      }
+
+      // CORRIGIDO: Chamando a rota correta no seu servidor local
+      const response = await fetch('http://localhost:3001/api/calculate-route', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            originCity: 'Pederneiras',
+            originState: 'SP',
+            destinationCity: formData.destinationCity,
+            destinationState: selectedStateObj.Sigla
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log("Dados da rota recebidos no frontend:", data); // Log para depuração
+        setRouteData(data);
+        // ATUALIZADO: Usa a distância da rota para preencher o campo
+        handleInputChange('totalKm', data.route.distance.toString());
+        setRouteError('');
+      } else {
+        const errorData = await response.json().catch(() => ({ error: 'Erro ao processar a resposta do servidor.' }));
+        throw new Error(errorData.error || 'Erro ao calcular rota');
+      }
+
     } catch (error) {
-      console.error("Error loading data:", error);
-      alert("Erro ao carregar dados. Verifique se a API está rodando.");
+      console.error("Erro ao calcular rota:", error);
+      setRouteError('Não foi possível calcular a rota. Insira a distância manualmente.');
+      setRouteData(null);
+      handleInputChange('totalKm', ''); // Limpa o KM em caso de erro
+    } finally {
+      setRouteLoading(false);
     }
   };
 
   const handleInputChange = (field, value) => {
     // Impede alteração do campo origin
     if (field === 'origin') return;
-    
-    // Se a modalidade de carregamento for alterada, limpa a seleção de transportadoras E tipo de caminhão
-    if (field === 'loadingMode') {
+
+    // Se o estado for alterado, limpa a cidade e km
+    if (field === 'destinationState') {
+      setFormData(prev => ({
+        ...prev,
+        destinationState: value,
+        destinationCity: '', // Limpa a cidade quando o estado muda
+        totalKm: '' // Limpa o KM quando o estado muda
+      }));
+      setRouteError(''); // Limpa o erro de rota
+      setRouteData(null); // Clear route data
+      setShowRouteMap(false); // Hide map
+    } else if (field === 'destinationCity') { // Quando a cidade muda, limpa o KM para recalcular
+      setFormData(prev => ({
+        ...prev,
+        destinationCity: value,
+        totalKm: '' // Limpa o KM quando a cidade muda
+      }));
+      setRouteError(''); // Limpa o erro de rota
+      setRouteData(null); // Clear route data
+      setShowRouteMap(false); // Hide map
+    } else if (field === 'loadingMode') {
       setFormData(prev => ({
         ...prev,
         loadingMode: value,
@@ -141,15 +260,15 @@ export default function QuotePage() {
   // Funções para gerenciar os campos de Gerente/Valor
   const handleManagerChange = (index, field, value) => {
     const updatedFields = [...managerFields];
-    
+
     // Validação para o campo valor
     if (field === 'valor') {
       // Limita a 9 dígitos
       if (value.length > 9) return;
-      
+
       const numericValue = parseFloat(value) || 0;
       const mapValue = parseFloat(formData.mapValue) || 0;
-      
+
       // Validação 1: Valor individual não pode ser maior que o valor do mapa
       if (mapValue > 0 && numericValue > mapValue) {
         alert(`O valor do gerente (${numericValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}) não pode ser maior que o valor do mapa (R$ ${mapValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`);
@@ -169,7 +288,7 @@ export default function QuotePage() {
         return;
       }
     }
-    
+
     updatedFields[index][field] = value;
     setManagerFields(updatedFields);
   };
@@ -183,7 +302,7 @@ export default function QuotePage() {
     if (!canAddMoreManagers()) {
       const mapValue = parseFloat(formData.mapValue) || 0;
       const managersTotal = calculateManagersTotal();
-      
+
       if (managersTotal >= mapValue) {
         alert(`Não é possível adicionar mais gerentes. O valor total dos gerentes (R$ ${managersTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}) já atingiu o valor do mapa (R$ ${mapValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`);
       } else {
@@ -219,7 +338,7 @@ export default function QuotePage() {
     }
   };
 
-  // ✅ NOVA FUNÇÃO: Para mapear modalidades fracionadas às suas principais
+  // NOVA FUNÇÃO: Para mapear modalidades fracionadas às suas principais
   const getCompatibleModality = (selectedModality) => {
     switch (selectedModality) {
       case 'bag_fracionado':
@@ -236,7 +355,7 @@ export default function QuotePage() {
     if (!formData.loadingMode) {
       return [];
     }
-    // ✅ ATUALIZADO: Usa a modalidade compatível para filtrar
+    // ATUALIZADO: Usa a modalidade compatível para filtrar
     const compatibleModality = getCompatibleModality(formData.loadingMode);
     return truckTypes.filter(truck => truck.modality === compatibleModality);
   };
@@ -244,23 +363,28 @@ export default function QuotePage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (!formData.mapNumber || !formData.origin || !formData.destination || !formData.totalKm || !formData.weight || !formData.mapValue || !formData.truckType || formData.selectedCarriers.length === 0 || !formData.loadingMode || !formData.loadingDate) {
+    // Validação atualizada para os novos campos de destino
+    if (!formData.mapNumber || !formData.origin || !formData.destinationState || !formData.destinationCity || !formData.totalKm || !formData.weight || !formData.mapValue || !formData.truckType || formData.selectedCarriers.length === 0 || !formData.loadingMode || !formData.loadingDate) {
       alert("Por favor, preencha todos os campos obrigatórios e selecione pelo menos uma transportadora");
       return;
     }
 
-    // ✅ NOVA LÓGICA: Filtrar apenas transportadoras que ainda não receberam este mapa
+    // Construir string de destino completa (Ex: "Cidade/UF")
+    const selectedStateObj = states.find(s => s.ID == formData.destinationState);
+    const fullDestination = selectedStateObj ? `${formData.destinationCity}/${selectedStateObj.Sigla}` : `${formData.destinationCity}/${formData.destinationState}`;
+
+    // NOVA LÓGICA: Filtrar apenas transportadoras que ainda não receberam este mapa
     let carriersToSend = [];
     let duplicateCarriers = [];
-    
+
     try {
       const allMaps = await FreightMap.list();
-      
+
       // Separar transportadoras que já receberam este mapa das que não receberam
       duplicateCarriers = formData.selectedCarriers.filter(carrierName =>
         allMaps.some(map => map.mapNumber === formData.mapNumber && map.selectedCarrier === carrierName)
       );
-      
+
       // Manter apenas as transportadoras que ainda não receberam este mapa
       carriersToSend = formData.selectedCarriers.filter(carrierName =>
         !allMaps.some(map => map.mapNumber === formData.mapNumber && map.selectedCarrier === carrierName)
@@ -295,21 +419,18 @@ export default function QuotePage() {
         alert(`Erro: O valor total dos gerentes (R$ ${managersTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}) excede o valor do mapa (R$ ${mapValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}). Por favor, ajuste os valores.`);
         return;
       }
-      if (managersTotal < mapValue && managerFields.some(f => f.gerente || f.valor)) { 
+      if (managersTotal < mapValue && managerFields.some(f => f.gerente || f.valor)) {
         alert(`Atenção: O valor total dos gerentes (R$ ${managersTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}) é menor que o valor do mapa (R$ ${mapValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}). Considere ajustar ou adicionar mais gerentes.`);
       }
     }
 
     setLoading(true);
     try {
-      // Criar timestamp em horário de Brasília
-      const now = new Date();
-
       const baseFreightData = {
         mapNumber: formData.mapNumber,
         mapImage: formData.mapImage,
         origin: formData.origin,
-        destination: formData.destination,
+        destination: fullDestination, // Usa o destino completo construído
         totalKm: parseInt(formData.totalKm),
         weight: parseFloat(formData.weight),
         mapValue: parseFloat(formData.mapValue),
@@ -327,7 +448,7 @@ export default function QuotePage() {
         updated_date: getBrazilIsoNow()
       };
 
-      // ✅ CRIAR UM MAPA APENAS PARA AS TRANSPORTADORAS QUE AINDA NÃO RECEBERAM
+      // CRIAR UM MAPA APENAS PARA AS TRANSPORTADORAS QUE AINDA NÃO RECEBERAM
       const freightPromises = carriersToSend.map(carrierName => {
         return FreightMap.create({
           ...baseFreightData,
@@ -341,15 +462,15 @@ export default function QuotePage() {
       try {
         // Buscar usuários do tipo carrier para obter seus emails
         const users = await User.list();
-        
+
         const emailPromises = carriersToSend.map(async (carrierName) => {
           // Encontrar o usuário carrier correspondente à transportadora
-          const carrierUser = users.find(user => 
-            user.userType === 'carrier' && 
-            user.carrierName === carrierName && 
+          const carrierUser = users.find(user =>
+            user.userType === 'carrier' &&
+            user.carrierName === carrierName &&
             user.active
           );
-          
+
           if (!carrierUser) {
             console.warn(`Usuário não encontrado para a transportadora: ${carrierName}. Email não enviado.`);
             return undefined;
@@ -375,28 +496,26 @@ export default function QuotePage() {
             default:
               loadingModeText = formData.loadingMode;
           }
-          
+
           const emailSubject = `🚛 Nova Cotação de Frete - Mapa ${formData.mapNumber}`;
           const emailBody = `
             <h2>Olá, ${carrierUser.fullName}!</h2>
             <p>Você recebeu uma nova cotação de frete:</p>
-            
+
             <h3>📋 DETALHES DA COTAÇÃO:</h3>
             <ul>
               <li><strong>Mapa:</strong> ${formData.mapNumber}</li>
-              <li><strong>Rota:</strong> ${formData.origin} → ${formData.destination}</li>
+              <li><strong>Rota:</strong> ${formData.origin} → ${fullDestination}</li>
               <li><strong>Distância:</strong> ${formData.totalKm} km</li>
               <li><strong>Peso:</strong> ${formData.weight} kg</li>
               <li><strong>Valor do Mapa:</strong> R$ ${parseFloat(formData.mapValue).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</li>
               <li><strong>Tipo de Caminhão:</strong> ${formData.truckType}</li>
-              <li><strong>Modalidade:</strong> ${loadingModeText}</li>
+              <li><strong>Modalidade:</b> ${loadingModeText}</li>
               <li><strong>Data de Carregamento:</strong> ${formData.loadingDate ? format(formData.loadingDate, 'dd/MM/yyyy', { locale: ptBR }) : 'Não informada'}</li>
             </ul>
-            
-            ${formData.routeInfo ? `<p><strong>📝 Observações da Rota:</strong><br>${formData.routeInfo}</p>` : ''}
-            
+
             <p>⏰ <strong>Acesse o sistema para enviar sua proposta!</strong></p>
-            
+
             <p>Atenciosamente,<br>Equipe UnionAgro</p>
           `;
 
@@ -420,20 +539,21 @@ export default function QuotePage() {
         // Não bloqueia o fluxo principal se houver erro no email
       }
 
-      // ✅ MENSAGEM DE SUCESSO PERSONALIZADA
+      // MENSAGEM DE SUCESSO PERSONALIZADA
       let successMessage = `Cotação criada com sucesso para ${carriersToSend.length} transportadora(s)!`;
       if (duplicateCarriers.length > 0) {
         successMessage += `\n\nNota: ${duplicateCarriers.length} transportadora(s) foram puladas por já terem recebido este mapa.`;
       }
       successMessage += '\n\nEmails de notificação foram enviados.';
-      
+
       alert(successMessage);
 
-      // Reset do form mantendo a origem fixa
+      // Reset do form mantendo a origem fixa e limpando os novos campos de destino
       setFormData({
         mapNumber: '',
         origin: 'Pederneiras/SP', // Mantém origem fixa no reset
-        destination: '',
+        destinationState: '',
+        destinationCity: '',
         totalKm: '',
         weight: '',
         mapValue: '',
@@ -445,6 +565,9 @@ export default function QuotePage() {
         mapImage: ''
       });
       setManagerFields([{ gerente: '', valor: '' }]);
+      setRouteError(''); // Limpa o erro de rota no reset
+      setRouteData(null); // Clear route data on reset
+      setShowRouteMap(false); // Hide map on reset
     } catch (error) {
       console.error("Error creating freight map:", error);
       alert("Erro ao criar cotação. Tente novamente.");
@@ -463,8 +586,9 @@ export default function QuotePage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6">
       <div className="max-w-4xl mx-auto">
+
         {/* Formulário Principal Centralizado */}
-        <Card className="shadow-xl border-0">
+        <Card className="shadow-xl border-0 mt-4">
           <CardHeader className="bg-gradient-to-r from-green-600 to-green-700 text-white rounded-t-lg">
             <CardTitle className="text-xl">Informações da Cotação</CardTitle>
           </CardHeader>
@@ -545,7 +669,7 @@ export default function QuotePage() {
                           >
                             {uploadingImage ? (
                               <div className="flex items-center">
-                                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-indigo-600 mr-3"></div>
+                                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-3"></div>
                                 Enviando...
                               </div>
                             ) : (
@@ -627,7 +751,7 @@ export default function QuotePage() {
                 </div>
               </div>
 
-              {/* Informações da Rota */}
+              {/* Informações da Rota - ATUALIZADA */}
               <div className="bg-blue-50 rounded-lg p-4">
                 <h3 className="font-semibold text-gray-800 mb-4 flex items-center">
                   <MapPin className="w-5 h-5 mr-2 text-blue-600" />
@@ -651,44 +775,107 @@ export default function QuotePage() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Destino *
+                      Estado de Destino *
                     </label>
-                    <Input
-                      type="text"
-                      value={formData.destination}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        // Permite apenas letras (incluindo acentuadas), espaços, barras e limita a 25 caracteres
-                        if (value.length <= 25 && /^[a-zA-ZÀ-ÿ\s\/]*$/.test(value)) {
-                          handleInputChange('destination', value);
-                        }
-                      }}
-                      placeholder="Ex: Rio de Janeiro/RJ"
-                      className="border-gray-300 focus:border-blue-500"
-                      maxLength={25}
-                      required
-                    />
-                    <p className="text-xs text-gray-500 mt-1">
-                      Máximo 25 caracteres - apenas letras, espaços e barras (/)
-                    </p>
+                    <Select value={formData.destinationState} onValueChange={(value) => handleInputChange('destinationState', value)}>
+                      <SelectTrigger className="border-gray-300">
+                        <SelectValue placeholder="Selecione o estado" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {states.map(state => (
+                          <SelectItem key={state.ID} value={state.ID}>{state.Nome}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Distância Total (km) *
-                  </label>
-                  <div className="relative">
-                    <Route className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                    <Input
-                      type="number"
-                      value={formData.totalKm}
-                      onChange={(e) => handleInputChange('totalKm', e.target.value)}
-                      placeholder="Ex: 450"
-                      className="pl-10 border-gray-300 focus:border-blue-500"
-                      required
-                    />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Cidade de Destino *
+                    </label>
+                    <Select
+                      value={formData.destinationCity}
+                      onValueChange={(value) => handleInputChange('destinationCity', value)}
+                      disabled={!formData.destinationState || routeLoading}
+                    >
+                      <SelectTrigger className="border-gray-300">
+                        <SelectValue placeholder={
+                          !formData.destinationState ? 'Selecione um estado primeiro' :
+                          cities.length === 0 ? 'Carregando cidades...' :
+                          'Selecione a cidade'
+                        } />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {cities.length > 0 ? (
+                          cities.map(city => (
+                            <SelectItem key={city.ID} value={city.Nome}>{city.Nome}</SelectItem>
+                          ))
+                        ) : (
+                          formData.destinationState && (
+                            <SelectItem value={null} disabled>
+                              {cities.length === 0 ? 'Nenhuma cidade encontrada' : 'Carregando...'}
+                            </SelectItem>
+                          )
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Distância Total (km) *
+                    </label>
+                    <div className="relative">
+                      <Route className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                      <Input
+                        type="number"
+                        value={formData.totalKm}
+                        onChange={(e) => handleInputChange('totalKm', e.target.value)}
+                        placeholder={routeLoading ? "Calculando..." : (routeError ? "Insira manualmente" : "Calculado automaticamente")}
+                        className="pl-10 border-gray-300 focus:border-blue-500"
+                        required
+                        readOnly={!routeError && !routeLoading && routeData}
+                        disabled={routeLoading}
+                      />
+                      {routeLoading && <Loader2 className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4 animate-spin" />}
+                    </div>
+                    {routeError && <p className="text-xs text-red-600 mt-1">{routeError}</p>}
+                    {routeData && !routeError && (
+                      <p className="text-xs text-green-600 mt-1">
+                        Rota calculada automaticamente • {Math.floor(routeData.route.duration / 60)}h {Math.round(routeData.route.duration % 60)}m
+                      </p>
+                    )}
                   </div>
                 </div>
+
+                {/* NOVO: Botão para mostrar/ocultar mapa */}
+                {routeData && (
+                  <div className="mt-4">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setShowRouteMap(!showRouteMap)}
+                      className="w-full flex items-center justify-center gap-2 border-blue-300 text-blue-600 hover:bg-blue-50"
+                    >
+                      <Map className="w-4 h-4" />
+                      {showRouteMap ? 'Ocultar Mapa da Rota' : 'Visualizar Mapa da Rota'}
+                      <ChevronDown className={`w-4 h-4 transition-transform ${showRouteMap ? 'rotate-180' : ''}`} />
+                    </Button>
+
+                    {/* NOVO: Componente do mapa */}
+                    {showRouteMap && (
+                      <div className="mt-4 rounded-lg overflow-hidden border border-blue-200">
+                        <RouteMapComponent
+                          origin={routeData.origin.coordinates}
+                          destination={routeData.destination.coordinates}
+                          // ATUALIZADO: Passa o objeto de rota completo para o componente do mapa
+                          route={routeData.route}
+                          height="400px"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Carga e Valores */}
@@ -772,20 +959,20 @@ export default function QuotePage() {
                           </p>
                         </div>
                       </div>
-                      
+
                       {/* Barra de progresso visual */}
                       <div className="mt-3">
                         <div className="bg-gray-200 rounded-full h-2">
-                          <div 
+                          <div
                             className={`h-2 rounded-full transition-all duration-300 ${
-                              calculateManagersTotal() >= parseFloat(formData.mapValue) 
-                                ? 'bg-red-500' 
-                                : calculateManagersTotal() > parseFloat(formData.mapValue) * 0.8 
-                                  ? 'bg-yellow-500' 
+                              calculateManagersTotal() >= parseFloat(formData.mapValue)
+                                ? 'bg-red-500'
+                                : calculateManagersTotal() > parseFloat(formData.mapValue) * 0.8
+                                  ? 'bg-yellow-500'
                                   : 'bg-green-500'
                             }`}
-                            style={{ 
-                              width: `${Math.min(100, (calculateManagersTotal() / parseFloat(formData.mapValue)) * 100)}%` 
+                            style={{
+                              width: `${Math.min(100, (calculateManagersTotal() / parseFloat(formData.mapValue)) * 100)}%`
                             }}
                           ></div>
                         </div>
@@ -850,8 +1037,8 @@ export default function QuotePage() {
                     variant="outline"
                     onClick={addManagerField}
                     className={`mt-4 border-dashed ${
-                      canAddMoreManagers() 
-                        ? 'border-teal-400 text-teal-600 hover:bg-teal-100 hover:text-teal-700' 
+                      canAddMoreManagers()
+                        ? 'border-teal-400 text-teal-600 hover:bg-teal-100 hover:text-teal-700'
                         : 'border-gray-300 text-gray-400 cursor-not-allowed'
                     }`}
                     disabled={!canAddMoreManagers()}
@@ -901,9 +1088,9 @@ export default function QuotePage() {
                     ) : getFilteredTruckTypes().length === 0 ? (
                       <div className="p-3 bg-yellow-100 border border-yellow-300 rounded-md text-yellow-800 text-center">
                         Nenhum tipo de caminhão cadastrado para a modalidade "{
-                          formData.loadingMode === 'paletizados' ? 'Paletizados' : 
-                          formData.loadingMode === 'bag' ? 'BAG' : 
-                          formData.loadingMode === 'granel' ? 'Granel' : 
+                          formData.loadingMode === 'paletizados' ? 'Paletizados' :
+                          formData.loadingMode === 'bag' ? 'BAG' :
+                          formData.loadingMode === 'granel' ? 'Granel' :
                           formData.loadingMode === 'bag_fracionado' ? 'BAG Fracionado' :
                           formData.loadingMode === 'paletizados_fracionado' ? 'Paletizados Fracionado' :
                           formData.loadingMode
@@ -941,19 +1128,19 @@ export default function QuotePage() {
                             .filter(carrier => carrier.active)
                             .filter(carrier => {
                               if (!formData.loadingMode) return true;
-                              // ✅ ATUALIZADO: Usa a modalidade compatível para filtrar transportadoras
+                              // ATUALIZADO: Usa a modalidade compatível para filtrar transportadoras
                               const compatibleModality = getCompatibleModality(formData.loadingMode);
-                              const carrierModalities = Array.isArray(carrier.modalities) 
-                                ? carrier.modalities 
+                              const carrierModalities = Array.isArray(carrier.modalities)
+                                ? carrier.modalities
                                 : (carrier.type ? [carrier.type] : []);
                               return carrierModalities.includes(compatibleModality);
                             })
                             .map((carrier) => {
                               // Obter modalidades da transportadora
-                              const carrierModalities = Array.isArray(carrier.modalities) 
-                                ? carrier.modalities 
+                              const carrierModalities = Array.isArray(carrier.modalities)
+                                ? carrier.modalities
                                 : (carrier.type ? [carrier.type] : []);
-                              
+
                               return (
                                 <div key={carrier.id} className="flex items-center space-x-3 p-2 hover:bg-purple-50 rounded">
                                   <Checkbox
@@ -969,10 +1156,10 @@ export default function QuotePage() {
                                       🚛 <span className="ml-1">{carrier.name}</span>
                                     </div>
                                     <span className="text-xs text-gray-500 block">
-                                      {carrierModalities.map(mod => 
-                                        mod === 'paletizados' ? 'Paletizados' : 
-                                        mod === 'bag' ? 'BAG' : 
-                                        mod === 'granel' ? 'Granel' : 
+                                      {carrierModalities.map(mod =>
+                                        mod === 'paletizados' ? 'Paletizados' :
+                                        mod === 'bag' ? 'BAG' :
+                                        mod === 'granel' ? 'Granel' :
                                         mod === 'bag_fracionado' ? 'BAG Fracionado' :
                                         mod === 'paletizados_fracionado' ? 'Paletizados Fracionado' :
                                         mod

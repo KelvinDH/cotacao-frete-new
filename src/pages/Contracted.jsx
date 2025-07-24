@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Package, Calendar, MapPin, Loader2, Search, ChevronDown, ChevronUp, FileText, Upload, Eye, Trash2, Download, DollarSign, TrendingDown, Percent, Route, Weight, Truck as TruckIcon, Edit, CheckCircle, Clock, Handshake as HandshakeIcon, Users, Map, Paperclip, AlertTriangle, User as UserIcon, Truck, BarChart2, Save, Ban, X, CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
+import { Package, Calendar, MapPin, Loader2, Search, ChevronDown, ChevronUp, FileText, Upload, Eye, Trash2, Download, DollarSign, TrendingDown, Percent, Route, Weight, Truck as TruckIcon, Edit, CheckCircle, Clock, Handshake as HandshakeIcon, Users, Map, Paperclip, AlertTriangle, User as UserIcon, Truck, BarChart2, Save, Ban, X, CalendarDays, ChevronLeft, ChevronRight, ArrowLeftCircle, AlertCircle } from "lucide-react";
 import { FreightMap, User as ApiUser, UploadFile, TruckType, Carrier } from "@/components/ApiDatabase";
 import { format, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -25,6 +25,15 @@ import {
   PopoverTrigger
 } from "@/components/ui/popover";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger, // Added as per outline
+  DialogFooter,
+  DialogClose // Added as per outline
+} from "@/components/ui/dialog";
 
 export default function ContractedPage() {
   const [contractedFreights, setContractedFreights] = useState([]);
@@ -51,6 +60,29 @@ export default function ContractedPage() {
   // ✅ NOVOS ESTADOS PARA PAGINAÇÃO
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
+
+  // NOVOS ESTADOS para reabrir negociação
+  const [reopeningFreight, setReopeningFreight] = useState(null);
+  const [reopenJustification, setReopenJustification] = useState('');
+  const [isReopening, setIsReopening] = useState(false);
+
+  // Placeholder for sendEmail function - in a real app, this would be an actual import from a utility file
+  const sendEmail = async ({ to, subject, html }) => {
+    console.log(`Simulating email send to: ${to}`);
+    console.log(`Subject: ${subject}`);
+    console.log(`Body: ${html}`);
+    // In a real application, you'd integrate with an email service here.
+    return new Promise(resolve => setTimeout(() => resolve({ success: true }), 500));
+  };
+
+  const getBrazilIsoNow = () => {
+    const now = new Date();
+    // This is a simplified approach for Brazil's timezone (GMT-3 for most of the year).
+    // For production, consider using a more robust library like date-fns-tz.
+    const offset = now.getTimezoneOffset() + (3 * 60); // Adjusting local offset to Brazil's GMT-3 offset
+    const brazilTime = new Date(now.getTime() - (offset * 60 * 1000));
+    return brazilTime.toISOString();
+  };
 
   useEffect(() => {
     loadData();
@@ -488,6 +520,93 @@ export default function ContractedPage() {
     }
   };
 
+  // NOVA FUNÇÃO: Reabrir frete para negociação (ATUALIZADA)
+  const handleReopenNegotiation = async () => {
+    if (!reopeningFreight) return;
+
+    // Validação
+    if (!reopenJustification.trim() || reopenJustification.trim().length < 10) {
+      alert('Por favor, forneça uma justificativa com pelo menos 10 caracteres para reabrir a negociação.');
+      return;
+    }
+
+    setIsReopening(true);
+    try {
+      // Criar observação sobre a reabertura
+      const reopenObservation = {
+        observation: `Frete reaberto para negociação. Justificativa: ${reopenJustification.trim()}`,
+        user: currentUser.fullName, // Updated as per outline
+        timestamp: getBrazilIsoNow(),
+        details: 'Reabertura para negociação'
+      };
+
+      // Atualizar o frete para status 'negotiating' e adicionar observação
+      const updatedFreight = {
+        ...reopeningFreight,
+        status: 'negotiating',
+        contractedAt: null, // Remove a data de contratação
+        finalValue: null, // Remove o valor final
+        justification: null, // Remove a justificativa anterior
+        finalizationObservation: null, // Remove observação de finalização anterior
+        editObservations: [...(reopeningFreight.editObservations || []), reopenObservation],
+        updated_date: getBrazilIsoNow()
+      };
+
+      await FreightMap.update(reopeningFreight.id, updatedFreight);
+      
+      // Enviar email para a transportadora notificando sobre a reabertura (preserved)
+      try {
+        const users = await ApiUser.list(); // Using ApiUser to list users
+        const carrierUser = users.find(user => 
+          user.userType === 'carrier' && 
+          user.carrierName === reopeningFreight.selectedCarrier && 
+          user.active
+        );
+        
+        if (carrierUser) {
+          const emailSubject = `🔄 Frete Reaberto para Negociação - Mapa ${reopeningFreight.mapNumber}`;
+          const emailBody = `
+            <h2>Olá, ${carrierUser.fullName}!</h2>
+            <p>O frete do mapa <strong>${reopeningFreight.mapNumber}</strong> com rota de <strong>${reopeningFreight.origin}</strong> para <strong>${reopeningFreight.destination}</strong> foi reaberto para negociação.</p>
+            
+            <h3>📋 JUSTIFICATIVA PARA REABERTURA:</h3>
+            <p><em>"${reopenJustification.trim()}"</em></p>
+            
+            <p>Acesse o sistema para visualizar os detalhes e continuar a negociação.</p>
+            
+            <p>Atenciosamente,<br>Equipe UnionAgro</p>
+          `;
+
+          await sendEmail({
+            to: carrierUser.email,
+            subject: emailSubject,
+            html: emailBody
+          });
+        } else {
+            console.warn(`Carrier user for ${reopeningFreight.selectedCarrier} not found or not active. Email not sent.`);
+        }
+      } catch (emailError) {
+        console.error('Erro ao enviar email de notificação:', emailError);
+        // Não bloqueia o fluxo principal se houver erro no email
+      }
+
+      alert('Frete reaberto para negociação com sucesso!');
+      
+      // Resetar estados do modal
+      setReopeningFreight(null);
+      setReopenJustification('');
+      
+      // Recarregar dados
+      await loadData(); // Changed from loadFreightMaps() to loadData()
+      
+    } catch (error) {
+      console.error('Erro ao reabrir frete para negociação:', error);
+      alert('Erro ao reabrir frete para negociação. Tente novamente.');
+    } finally {
+      setIsReopening(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="max-w-6xl mx-auto p-6 flex justify-center items-center h-64">
@@ -609,6 +728,21 @@ export default function ContractedPage() {
                             <Edit className="w-4 h-4 mr-2" />
                             Editar Frete
                           </Button>
+                          {/* NOVA AÇÃO: Botão para reabrir negociação (apenas para admin/user) */}
+                          {currentUser && (currentUser.userType === 'admin' || currentUser.userType === 'user') && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={(e) => { // Stop propagation
+                                e.stopPropagation();
+                                setReopeningFreight(firstFreight);
+                              }}
+                              className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 border-blue-300"
+                            >
+                              <ArrowLeftCircle className="w-4 h-4 mr-2" />
+                              Reabrir Negociação
+                            </Button>
+                          )}
                           <Button
                             variant="outline"
                             size="sm"
@@ -1419,6 +1553,84 @@ export default function ContractedPage() {
           )}
         </>
       )}
+
+      {/* NOVO MODAL: Reabrir Negociação (ATUALIZADO) */}
+      <Dialog open={!!reopeningFreight} onOpenChange={() => setReopeningFreight(null)}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Reabrir Frete para Negociação</DialogTitle>
+          </DialogHeader>
+          <div className="py-4 space-y-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <h4 className="font-semibold text-blue-800 mb-2">Informações do Frete</h4>
+              <div className="space-y-1 text-sm text-blue-700">
+                <p><strong>Mapa:</strong> {reopeningFreight?.mapNumber}</p>
+                <p><strong>Transportadora:</strong> {reopeningFreight?.selectedCarrier}</p>
+                <p><strong>Rota:</strong> {reopeningFreight?.origin} → {reopeningFreight?.destination}</p>
+                <p><strong>Valor Final:</strong> R$ {reopeningFreight?.finalValue?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p> {/* Changed text from "Valor Final Contratado" to "Valor Final" */}
+              </div>
+            </div>
+
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+              <div className="flex items-start">
+                <AlertCircle className="w-5 h-5 text-yellow-600 mr-2 mt-0.5 flex-shrink-0" />
+                <div className="text-sm text-yellow-800">
+                  <p className="font-semibold mb-1">Atenção!</p>
+                  <p>Esta ação irá retornar o frete para a página de negociação e permitirá um novo acordo de valores.</p> {/* Updated message as per outline */}
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="reopen-justification" className="text-sm font-medium text-gray-700">
+                Justificativa para Reabertura *
+              </Label>
+              <Textarea
+                id="reopen-justification"
+                value={reopenJustification}
+                onChange={(e) => setReopenJustification(e.target.value)}
+                placeholder="Descreva o motivo para reabrir este frete..." // Updated placeholder as per outline
+                className="mt-2"
+                rows={4}
+                maxLength={500}
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Campo obrigatório. ({reopenJustification.trim().length}/500) {/* Updated text for char count */}
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button 
+              type="button" 
+              variant="outline" 
+              onClick={() => {
+                setReopeningFreight(null);
+                setReopenJustification(''); // Clear justification on cancel (already existing, but explicitly kept)
+              }}
+              disabled={isReopening}
+            >
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleReopenNegotiation}
+              disabled={isReopening || !reopenJustification.trim() || reopenJustification.trim().length < 10} // Kept robust validation
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              {isReopening ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Reabrindo...
+                </>
+              ) : (
+                <>
+                  <ArrowLeftCircle className="w-4 h-4 mr-2" />
+                  Confirmar e Reabrir {/* Updated button text */}
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
