@@ -30,10 +30,11 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger, // Added as per outline
+  DialogTrigger,
   DialogFooter,
-  DialogClose // Added as per outline
+  DialogClose
 } from "@/components/ui/dialog";
+import RouteMapComponent from '../components/RouteMapComponent';
 
 export default function ContractedPage() {
   const [contractedFreights, setContractedFreights] = useState([]);
@@ -535,7 +536,7 @@ export default function ContractedPage() {
       // Criar observação sobre a reabertura
       const reopenObservation = {
         observation: `Frete reaberto para negociação. Justificativa: ${reopenJustification.trim()}`,
-        user: currentUser.fullName, // Updated as per outline
+        user: currentUser.fullName,
         timestamp: getBrazilIsoNow(),
         details: 'Reabertura para negociação'
       };
@@ -553,27 +554,27 @@ export default function ContractedPage() {
       };
 
       await FreightMap.update(reopeningFreight.id, updatedFreight);
-      
+
       // Enviar email para a transportadora notificando sobre a reabertura (preserved)
       try {
         const users = await ApiUser.list(); // Using ApiUser to list users
-        const carrierUser = users.find(user => 
-          user.userType === 'carrier' && 
-          user.carrierName === reopeningFreight.selectedCarrier && 
+        const carrierUser = users.find(user =>
+          user.userType === 'carrier' &&
+          user.carrierName === reopeningFreight.selectedCarrier &&
           user.active
         );
-        
+
         if (carrierUser) {
           const emailSubject = `🔄 Frete Reaberto para Negociação - Mapa ${reopeningFreight.mapNumber}`;
           const emailBody = `
             <h2>Olá, ${carrierUser.fullName}!</h2>
             <p>O frete do mapa <strong>${reopeningFreight.mapNumber}</strong> com rota de <strong>${reopeningFreight.origin}</strong> para <strong>${reopeningFreight.destination}</strong> foi reaberto para negociação.</p>
-            
+
             <h3>📋 JUSTIFICATIVA PARA REABERTURA:</h3>
             <p><em>"${reopenJustification.trim()}"</em></p>
-            
+
             <p>Acesse o sistema para visualizar os detalhes e continuar a negociação.</p>
-            
+
             <p>Atenciosamente,<br>Equipe UnionAgro</p>
           `;
 
@@ -591,13 +592,13 @@ export default function ContractedPage() {
       }
 
       alert('Frete reaberto para negociação com sucesso!');
-      
+
       // Resetar estados do modal
       setReopeningFreight(null);
       setReopenJustification('');
-      
+
       // Recarregar dados
-      await loadData(); // Changed from loadFreightMaps() to loadData()
+      await loadData();
       
     } catch (error) {
       console.error('Erro ao reabrir frete para negociação:', error);
@@ -1076,7 +1077,7 @@ export default function ContractedPage() {
                         {(() => {
                           const allProposalsForMap = allFreightMaps
                             .filter(map => map.mapNumber === mapNumber)
-                            .flatMap(map => map.carrierProposals ? 
+                            .flatMap(map => map.carrierProposals ?
                               Object.entries(map.carrierProposals).map(([carrier, value]) => ({ carrier, value })) : []
                             )
                             .filter(proposal => proposal.value > 0);
@@ -1092,10 +1093,10 @@ export default function ContractedPage() {
                           return (
                             <div className="space-y-2">
                               {sortedProposals.map((proposal, index) => (
-                                <div key={`${proposal.carrier}-${index}`} 
+                                <div key={`${proposal.carrier}-${index}`}
                                      className={`flex justify-between items-center p-3 rounded-lg ${
-                                       proposal.carrier === firstFreight.selectedCarrier 
-                                         ? 'bg-green-100 border border-green-300' 
+                                       proposal.carrier === firstFreight.selectedCarrier
+                                         ? 'bg-green-100 border border-green-300'
                                          : 'bg-white border border-gray-200'
                                      }`}>
                                   <span className="font-medium text-gray-800 flex items-center">
@@ -1135,21 +1136,56 @@ export default function ContractedPage() {
                         </div>
                       )}
 
-                      {firstFreight.mapImage && (
-                        <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
-                          <h4 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-                            <Map className="w-5 h-5 mr-2 text-blue-600" />
-                            Mapa da Rota
-                          </h4>
-                          <a href={firstFreight.mapImage} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
-                            <img
-                              src={firstFreight.mapImage}
-                              alt="Mapa da Rota"
-                              className="w-full h-full object-contain max-h-[400px] rounded-md bg-white p-1 border"
+                      {/* Coluna Direita - Mapa da Rota e Imagem */}
+                      <div className="space-y-4">
+                        {/* ✅ NOVO: Seção do Mapa da Rota - Primeiro lugar */}
+                        {firstFreight.routeData &&
+                         firstFreight.routeData.origin &&
+                         firstFreight.routeData.destination &&
+                         firstFreight.routeData.route &&
+                         Array.isArray(firstFreight.routeData.origin) &&
+                         Array.isArray(firstFreight.routeData.destination) &&
+                         firstFreight.routeData.origin.length >= 2 &&
+                         firstFreight.routeData.destination.length >= 2 && (
+                          <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                            <RouteMapComponent
+                              origin={firstFreight.routeData.origin}
+                              destination={firstFreight.routeData.destination}
+                              route={firstFreight.routeData.route}
+                              height="300px"
                             />
-                          </a>
-                        </div>
-                      )}
+                            <div className="mt-3">
+                              <h4 className="font-semibold text-blue-800 mb-2 flex items-center">
+                                <Route className="w-5 h-5 mr-2" />
+                                Detalhes da Rota
+                              </h4>
+                              <div className="text-sm text-blue-700 bg-blue-100 rounded p-2">
+                                <div className="flex justify-between items-center">
+                                  <span>📏 Distância: <strong>{firstFreight.routeData.route.distance || 'N/A'} km</strong></span>
+                                  <span>⏱️ Tempo estimado: <strong>{firstFreight.routeData.route.duration ? `${Math.floor(firstFreight.routeData.route.duration / 60)}h ${Math.round(firstFreight.routeData.route.duration % 60)}m` : 'N/A'}</strong></span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Imagem do Mapa (existente) - Segundo lugar */}
+                        {firstFreight.mapImage && (
+                          <div className="bg-gray-50 rounded-lg p-4 border">
+                            <h4 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                              <Map className="w-5 h-5 mr-2 text-blue-600" />
+                              Mapa (Imagem)
+                            </h4>
+                            <a href={firstFreight.mapImage} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
+                              <img
+                                src={firstFreight.mapImage}
+                                alt="Mapa da Rota"
+                                className="w-full h-full object-contain max-h-[400px] rounded-md bg-white p-1 border"
+                              />
+                            </a>
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     {/* Informações dos Gerentes */}
@@ -1567,7 +1603,7 @@ export default function ContractedPage() {
                 <p><strong>Mapa:</strong> {reopeningFreight?.mapNumber}</p>
                 <p><strong>Transportadora:</strong> {reopeningFreight?.selectedCarrier}</p>
                 <p><strong>Rota:</strong> {reopeningFreight?.origin} → {reopeningFreight?.destination}</p>
-                <p><strong>Valor Final:</strong> R$ {reopeningFreight?.finalValue?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p> {/* Changed text from "Valor Final Contratado" to "Valor Final" */}
+                <p><strong>Valor Final:</strong> R$ {reopeningFreight?.finalValue?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
               </div>
             </div>
 
@@ -1576,7 +1612,7 @@ export default function ContractedPage() {
                 <AlertCircle className="w-5 h-5 text-yellow-600 mr-2 mt-0.5 flex-shrink-0" />
                 <div className="text-sm text-yellow-800">
                   <p className="font-semibold mb-1">Atenção!</p>
-                  <p>Esta ação irá retornar o frete para a página de negociação e permitirá um novo acordo de valores.</p> {/* Updated message as per outline */}
+                  <p>Esta ação irá retornar o frete para a página de negociação e permitirá um novo acordo de valores.</p>
                 </div>
               </div>
             </div>
@@ -1589,31 +1625,31 @@ export default function ContractedPage() {
                 id="reopen-justification"
                 value={reopenJustification}
                 onChange={(e) => setReopenJustification(e.target.value)}
-                placeholder="Descreva o motivo para reabrir este frete..." // Updated placeholder as per outline
+                placeholder="Descreva o motivo para reabrir este frete..."
                 className="mt-2"
                 rows={4}
                 maxLength={500}
               />
               <p className="text-xs text-gray-500 mt-1">
-                Campo obrigatório. ({reopenJustification.trim().length}/500) {/* Updated text for char count */}
+                Campo obrigatório. ({reopenJustification.trim().length}/500)
               </p>
             </div>
           </div>
           <DialogFooter>
-            <Button 
-              type="button" 
-              variant="outline" 
+            <Button
+              type="button"
+              variant="outline"
               onClick={() => {
                 setReopeningFreight(null);
-                setReopenJustification(''); // Clear justification on cancel (already existing, but explicitly kept)
+                setReopenJustification('');
               }}
               disabled={isReopening}
             >
               Cancelar
             </Button>
-            <Button 
+            <Button
               onClick={handleReopenNegotiation}
-              disabled={isReopening || !reopenJustification.trim() || reopenJustification.trim().length < 10} // Kept robust validation
+              disabled={isReopening || !reopenJustification.trim() || reopenJustification.trim().length < 10}
               className="bg-blue-600 hover:bg-blue-700"
             >
               {isReopening ? (
@@ -1624,7 +1660,7 @@ export default function ContractedPage() {
               ) : (
                 <>
                   <ArrowLeftCircle className="w-4 h-4 mr-2" />
-                  Confirmar e Reabrir {/* Updated button text */}
+                  Confirmar e Reabrir
                 </>
               )}
             </Button>

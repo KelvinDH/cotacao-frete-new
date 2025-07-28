@@ -1,4 +1,3 @@
-
 export const cities = [
     {
 	"ID": "1",

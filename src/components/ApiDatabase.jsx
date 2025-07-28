@@ -1,6 +1,9 @@
 
+
 // API Database - Conecta com a API Express
-const API_BASE_URL = 'http://localhost:3001/api';
+// ✅ LÓGICA ATUALIZADA PARA USAR O HOSTNAME DA REDE OU LOCALHOST
+const API_HOST = window.location.hostname;
+const API_BASE_URL = `http://${API_HOST}:3001/api`;
 
 class ApiDatabase {
     async request(endpoint, options = {}) {
@@ -201,3 +204,4 @@ export const UploadFile = async ({ file }) => {
 };
 
 export default apiDB;
+

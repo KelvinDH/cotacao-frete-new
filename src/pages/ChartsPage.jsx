@@ -1,12 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
 import { FreightMap } from "@/components/ApiDatabase";
-import { BarChart as BarChartIcon, PieChart as PieChartIcon, TrendingUp, Loader2, DollarSign, Map, Truck, TrendingDown as SavingsIcon, Percent, Filter, User as UserIcon, MapPin, Expand, X as XIcon } from 'lucide-react';
+import { BarChart as BarChartIcon, PieChart as PieChartIcon, TrendingUp, Loader2, DollarSign, Map, Truck, TrendingDown as SavingsIcon, Percent, Filter, MapPin, Expand, X as XIcon, Route } from 'lucide-react'; // Added Route icon
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   PieChart, Pie, Cell, Sector
 } from 'recharts';
-import { format, parseISO } from 'date-fns';
+import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Chart } from 'react-google-charts';
@@ -17,7 +17,6 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
-  DialogClose
 } from "@/components/ui/dialog";
 import { Button } from '@/components/ui/button';
 
@@ -78,6 +77,7 @@ const renderActiveShape = (props) => {
   );
 };
 
+const formatCurrency = (value) => `R$ ${Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export default function ChartsPage() {
   const [loading, setLoading] = useState(true);
@@ -109,11 +109,14 @@ export default function ChartsPage() {
   // State for filters and new metric
   const [selectedModality, setSelectedModality] = useState('all');
   const [selectedManager, setSelectedManager] = useState('all');
-  const [availableManagers, setAvailableManagers] = useState([]);
+  // Removed availableManagers state as managerOptions will be hardcoded for the dropdown.
   const [totalSpent, setTotalSpent] = useState(0); // New metric
 
   // NOVO ESTADO: Para controlar o modal de visualização do gráfico
   const [modalContent, setModalContent] = useState(null);
+
+  // ✅ CORRIGIDO: Lista de gerentes incluindo VENDA DIRETA e VerdeLog
+  const managerOptions = ["TIAGO LOPES TOLENTINO", "CLAUDIO FEUSER", "DIEGO JOSÉ MANIAS MARSÃO", "VENDA DIRETA", "VerdeLog"];
 
   // Função para converter para horário de Brasília
   const toBrazilDateTime = (dateString) => {
@@ -133,9 +136,7 @@ export default function ChartsPage() {
       const maps = await FreightMap.filter({ status: 'contracted' });
       setFreightData(maps);
 
-      // Extract unique managers for the filter dropdown
-      const managers = [...new Set(maps.flatMap(map => map.managers ? map.managers.map(m => m.gerente) : []))];
-      setAvailableManagers(managers.sort());
+      // Removed setAvailableManagers as managerOptions will be hardcoded for the dropdown.
 
     } catch (error) {
       console.error("Error loading freight data for charts:", error);
@@ -380,9 +381,11 @@ export default function ChartsPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-[calc(100vh-200px)]">
-        <Loader2 className="w-12 h-12 text-green-600 animate-spin" />
-        <p className="ml-4 text-lg text-gray-600">Carregando gráficos...</p>
+      <div className="flex justify-center items-center h-[80vh]">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 text-green-600 animate-spin mx-auto" />
+          <p className="mt-4 text-lg text-gray-600">Carregando dados...</p>
+        </div>
       </div>
     );
   }
@@ -405,45 +408,61 @@ export default function ChartsPage() {
   );
 
   return (
-    <div className="p-6 space-y-8">
+    <div className="p-6 bg-gray-50/50 min-h-screen">
       <h2 className="text-3xl font-bold text-gray-800 mb-2 flex items-center">
         <BarChartIcon className="w-8 h-8 mr-3 text-green-600" />
         Análise Gráfica de Fretes
       </h2>
 
-      {/* FILTERS SECTION */}
-      <div className="bg-white p-4 rounded-xl shadow-md border border-gray-200 flex flex-col md:flex-row gap-4 items-center">
-        <div className="flex items-center text-gray-600 font-semibold">
-          <Filter className="w-5 h-5 mr-2"/>
-          Filtros:
-        </div>
-        <div className="w-full md:w-auto min-w-[180px]">
-          <Select value={selectedModality} onValueChange={setSelectedModality}>
-            <SelectTrigger>
-              <SelectValue placeholder="Filtrar por modalidade..." />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas as Modalidades</SelectItem>
-              <SelectItem value="paletizados">Paletizados</SelectItem>
-              <SelectItem value="bag">BAG</SelectItem>
-              <SelectItem value="granel">Granel</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="w-full md:w-auto min-w-[180px]">
-          <Select value={selectedManager} onValueChange={setSelectedManager} disabled={availableManagers.length === 0}>
-            <SelectTrigger>
-              <SelectValue placeholder="Filtrar por gerente..." />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos os Gerentes</SelectItem>
-              {availableManagers.map(manager => (
-                <SelectItem key={manager} value={manager}>{manager}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+      {/* Filtros */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="flex items-center">
+            <Filter className="w-5 h-5 mr-2" />
+            Filtros
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Modalidade
+              </label>
+              <Select value={selectedModality} onValueChange={setSelectedModality}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Todas as Modalidades" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas as Modalidades</SelectItem>
+                  <SelectItem value="paletizados">Paletizados</SelectItem>
+                  <SelectItem value="bag">BAG</SelectItem>
+                  <SelectItem value="granel">Granel</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Gerente
+              </label>
+              <Select value={selectedManager} onValueChange={setSelectedManager}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Todos os gerentes" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos os gerentes</SelectItem>
+                  {/* ✅ CORRIGIDO: Usar managerOptions em vez de lista hardcoded */}
+                  {managerOptions.map(manager => (
+                    <SelectItem key={manager} value={manager}>
+                      {manager}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* METRICS CARDS */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -501,8 +520,17 @@ export default function ChartsPage() {
                 title: 'Valor por KM por Cidade (Destino)',
                 type: 'google-column',
                 data: chartsData.valuePerKmByCity,
+                tableHeaders: ['Cidade', 'Valor por KM (R$)'],
+                valueFormatter: (val) => formatCurrency(val),
                 options: {
-                  title: 'Valor Médio por Quilômetro por Cidade', hAxis: { title: 'Cidade' }, vAxis: { title: 'R$ por KM' }, colors: ['#8b5cf6'], backgroundColor: 'transparent', titleTextStyle: { color: '#374151', fontSize: 16 }, legend: { position: 'none' }
+                  title: 'Valor Médio por Quilômetro por Cidade',
+                  hAxis: { title: 'Cidade' },
+                  vAxis: { title: 'R$ por KM', format: 'R$ #,##0.00' },
+                  colors: ['#8b5cf6'],
+                  backgroundColor: 'transparent',
+                  titleTextStyle: { color: '#374151', fontSize: 16 },
+                  legend: { position: 'none' },
+                  chartArea: { width: '80%', height: '70%' } // Added chartArea for modal view
                 }
               })}
             >
@@ -512,7 +540,7 @@ export default function ChartsPage() {
                     data={chartsData.valuePerKmByCity}
                     options={{ colors: ['#8b5cf6'], backgroundColor: 'transparent', legend: { position: 'none' } }}
                     width="100%"
-                    height="300px"
+                    height="400px"
                   />
                 ) : (
                   <div className="flex items-center justify-center h-full text-gray-500">
@@ -523,23 +551,32 @@ export default function ChartsPage() {
 
             <ChartCard
               title="Valor por KM por Estado (Destino)"
-              icon={<MapPin className="w-5 h-5 mr-2 text-indigo-600" />}
+              icon={<Map className="w-5 h-5 mr-2 text-indigo-600" />}
               onExpand={() => openChartModal({
                 title: 'Valor por KM por Estado (Destino)',
-                type: 'google-column',
+                type: 'google-bar', // Changed type to google-bar for modal
                 data: chartsData.valuePerKmByState,
+                tableHeaders: ['Estado', 'Valor por KM (R$)'],
+                valueFormatter: (val) => formatCurrency(val),
                 options: {
-                  title: 'Valor Médio por Quilômetro por Estado', hAxis: { title: 'Estado' }, vAxis: { title: 'R$ por KM' }, colors: ['#6366f1'], backgroundColor: 'transparent', titleTextStyle: { color: '#374151', fontSize: 16 }, legend: { position: 'none' }
+                  title: 'Valor Médio por Quilômetro por Estado',
+                  hAxis: { title: 'R$ por KM', format: 'R$ #,##0.00' },
+                  vAxis: { title: 'Estado' },
+                  colors: ['#4f46e5'],
+                  backgroundColor: 'transparent',
+                  titleTextStyle: { color: '#374151', fontSize: 16 },
+                  legend: { position: 'none' },
+                  chartArea: { width: '70%', height: '80%' } // Added chartArea for modal view
                 }
               })}
             >
                 {chartsData.valuePerKmByState && chartsData.valuePerKmByState.length > 1 ? (
                   <Chart
-                    chartType="ColumnChart"
+                    chartType="BarChart" // Changed to BarChart for consistency with outline's implied preference for modal
                     data={chartsData.valuePerKmByState}
-                    options={{ colors: ['#6366f1'], backgroundColor: 'transparent', legend: { position: 'none' } }}
+                    options={{ colors: ['#4f46e5'], backgroundColor: 'transparent', legend: { position: 'none' } }}
                     width="100%"
-                    height="300px"
+                    height="400px"
                   />
                 ) : (
                   <div className="flex items-center justify-center h-full text-gray-500">
@@ -555,12 +592,13 @@ export default function ChartsPage() {
               icon={<DollarSign className="w-5 h-5 mr-2 text-green-500" />}
               onExpand={() => openChartModal({
                 title: 'Valor Total por Transportadora (R$)',
-                type: 'bar',
+                type: 'recharts-bar',
                 data: valueByCarrier,
-                yAxisFormatter: (value) => `R$${(value/1000).toFixed(0)}k`,
-                tooltipFormatter: (value) => [`R$${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, "Valor Total"],
-                barFill: "#22c55e",
-                barName: "Valor Total"
+                dataKey: 'value',
+                nameKey: 'name',
+                chartName: 'Valor Total',
+                tableHeaders: ['Transportadora', 'Valor (R$)'],
+                valueFormatter: (val) => formatCurrency(val)
               })}
             >
               <ResponsiveContainer width="100%" height={400}>
@@ -580,22 +618,32 @@ export default function ChartsPage() {
               icon={<Map className="w-5 h-5 mr-2 text-blue-500" />}
               onExpand={() => openChartModal({
                 title: 'Contagem de Fretes por Estado (Destino)',
-                type: 'bar-vertical',
+                type: 'recharts-pie', // Changed to pie as per outline
                 data: countByState,
-                tooltipFormatter: (value) => [value, "Nº de Fretes"],
-                barFill: "#3b82f6",
-                barName: "Nº de Fretes"
+                tableHeaders: ['Estado', 'Nº de Fretes'],
+                valueFormatter: (val) => val
               })}
             >
               <ResponsiveContainer width="100%" height={400}>
-                <BarChart data={countByState} layout="vertical" margin={{ top: 5, right: 20, left: 50, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis type="number" />
-                  <YAxis type="category" dataKey="name" style={{ fontSize: '12px' }} />
-                  <Tooltip formatter={(value) => [value, "Nº de Fretes"]} />
-                  <Legend verticalAlign="top" />
-                  <Bar dataKey="value" fill="#3b82f6" name="Nº de Fretes" />
-                </BarChart>
+                <PieChart>
+                  <Pie
+                    activeIndex={activePieIndex}
+                    activeShape={renderActiveShape}
+                    data={countByState}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={80}
+                    outerRadius={120}
+                    fill="#3b82f6"
+                    dataKey="value"
+                    onMouseEnter={onPieEnter}
+                  >
+                   {countByState.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Legend />
+                </PieChart>
               </ResponsiveContainer>
             </ChartCard>
 
@@ -604,23 +652,24 @@ export default function ChartsPage() {
               icon={<Truck className="w-5 h-5 mr-2 text-purple-500" />}
               onExpand={() => openChartModal({
                 title: 'Distribuição por Modalidade de Carregamento',
-                type: 'pie',
-                data: loadingModeDist
+                type: 'recharts-pie',
+                data: loadingModeDist,
+                tableHeaders: ['Modalidade', 'Nº de Fretes'],
+                valueFormatter: (val) => val
               })}
             >
               <ResponsiveContainer width="100%" height={400}>
                 <PieChart>
                   <Pie
-                    activeIndex={activePieIndex}
-                    activeShape={renderActiveShape}
                     data={loadingModeDist}
                     cx="50%"
                     cy="50%"
-                    innerRadius={80}
+                    innerRadius={80} // Set inner and outer for a donut
                     outerRadius={120}
                     fill="#8884d8"
                     dataKey="value"
-                    onMouseEnter={onPieEnter}
+                    labelLine={false}
+                    label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
                   >
                    {loadingModeDist.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
@@ -636,12 +685,13 @@ export default function ChartsPage() {
               icon={<SavingsIcon className="w-5 h-5 mr-2 text-teal-500" />}
               onExpand={() => openChartModal({
                 title: 'Economia Média por Transportadora (R$)',
-                type: 'bar',
+                type: 'recharts-bar',
                 data: savingsByCarrier,
-                yAxisFormatter: (value) => `R$${value.toFixed(0)}`,
-                tooltipFormatter: (value) => [`R$${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, "Economia Média"],
-                barFill: "#14b8a6",
-                barName: "Economia Média"
+                dataKey: 'value',
+                nameKey: 'name',
+                chartName: 'Economia Média',
+                tableHeaders: ['Transportadora', 'Economia (R$)'],
+                valueFormatter: (val) => formatCurrency(val)
               })}
             >
               <ResponsiveContainer width="100%" height={400}>
@@ -662,12 +712,13 @@ export default function ChartsPage() {
               icon={<Percent className="w-5 h-5 mr-2 text-orange-500" />}
               onExpand={() => openChartModal({
                 title: '% do Valor Final / Proposta Inicial',
-                type: 'bar',
+                type: 'recharts-bar',
                 data: savingsPercentageByCarrier,
-                yAxisFormatter: (value) => `${value.toFixed(0)}%`,
-                tooltipFormatter: (value) => [`${value.toFixed(2)}%`, "Média do Valor Final"],
-                barFill: "#f97316",
-                barName: "% Valor Final vs Proposta",
+                dataKey: 'value',
+                nameKey: 'name',
+                chartName: '% Valor Final vs Proposta',
+                tableHeaders: ['Transportadora', 'Média do Valor Final (%)'],
+                valueFormatter: (val) => `${val.toFixed(2)}%`,
                 yAxisDomain: [0, 110]
               })}
             >
@@ -685,22 +736,24 @@ export default function ChartsPage() {
 
             <ChartCard
               title="Quilometragem Total por Transportadora"
-              icon={<Truck className="w-5 h-5 mr-2 text-indigo-500" />}
+              icon={<Route className="w-5 h-5 mr-2 text-cyan-500" />}
               onExpand={() => openChartModal({
                 title: 'Quilometragem Total por Transportadora',
-                type: 'bar',
+                type: 'recharts-bar',
                 data: kmByCarrier,
-                yAxisFormatter: (value) => `${(value/1000).toFixed(1)}k km`,
-                tooltipFormatter: (value) => [`${value.toLocaleString('pt-BR')} km`, "KM Total"],
-                barFill: "#2E7D32",
-                barName: "Quilometragem Total"
+                dataKey: 'value',
+                nameKey: 'name',
+                chartName: 'Distância Total',
+                tableHeaders: ['Transportadora', 'Distância (km)'],
+                valueFormatter: (val) => `${val.toLocaleString('pt-BR')} km`,
+                layout: 'vertical'
               })}
             >
               <ResponsiveContainer width="100%" height={400}>
-                <BarChart data={kmByCarrier} margin={{ top: 5, right: 30, left: 40, bottom: 50 }}>
+                <BarChart data={kmByCarrier} layout="vertical" margin={{ top: 5, right: 30, left: 40, bottom: 50 }}>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="name" angle={-35} textAnchor="end" interval={0} style={{ fontSize: '12px' }}/>
-                  <YAxis tickFormatter={(value) => `${(value/1000).toFixed(1)}k km`} />
+                  <XAxis type="number" tickFormatter={(value) => `${(value/1000).toFixed(1)}k km`} />
+                  <YAxis type="category" dataKey="name" style={{ fontSize: '12px' }} />
                   <Tooltip formatter={(value) => [`${value.toLocaleString('pt-BR')} km`, "KM Total"]} />
                   <Legend verticalAlign="top" />
                   <Bar dataKey="value" name="Quilometragem Total" fill="#2E7D32" />
@@ -711,14 +764,16 @@ export default function ChartsPage() {
 
           <ChartCard
             title="Volume de Fretes Contratados ao Longo do Tempo"
-            icon={<TrendingUp className="w-5 h-5 mr-2 text-indigo-500" />}
+            icon={<TrendingUp className="w-5 h-5 mr-2 text-fuchsia-500" />}
             onExpand={() => openChartModal({
               title: 'Volume de Fretes Contratados ao Longo do Tempo',
-              type: 'bar',
+              type: 'recharts-bar',
               data: freightsOverTime,
-              xAxisDataKey: "month", // Special case for freightsOverTime
-              barFill: "#6366f1",
-              barName: "Nº de Fretes"
+              dataKey: 'value', // Corrected from 'count' in outline
+              nameKey: 'month', // Corrected from 'date' in outline
+              chartName: 'Nº Fretes',
+              tableHeaders: ['Mês/Ano', 'Nº de Fretes'],
+              valueFormatter: (val) => val
             })}
           >
             <ResponsiveContainer width="100%" height={300}>
@@ -737,92 +792,105 @@ export default function ChartsPage() {
 
       {/* Modal para Visualização do Gráfico */}
       <Dialog open={!!modalContent} onOpenChange={closeChartModal}>
-        <DialogContent className="max-w-4xl h-[80vh] flex flex-col p-0">
-          <DialogHeader className="p-6 pb-4 border-b">
-            <DialogTitle className="text-2xl">{modalContent?.title}</DialogTitle>
-          </DialogHeader>
-          <div className="flex-grow p-6 overflow-y-auto">
-            {modalContent?.type === 'google-column' ? (
-              <Chart
-                chartType="ColumnChart"
-                data={modalContent.data}
-                options={modalContent.options} // Pass the full options object
-                width="100%"
-                height="100%"
-                legendToggle
-              />
-            ) : modalContent?.type === 'bar' ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={modalContent.data} margin={{ top: 20, right: 30, left: 40, bottom: 80 }}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis
-                    dataKey={modalContent.xAxisDataKey || "name"} // Use specific dataKey or default to "name"
-                    angle={-45}
-                    textAnchor="end"
-                    interval={0}
-                    style={{ fontSize: '12px' }}
-                  />
-                  <YAxis
-                    tickFormatter={modalContent.yAxisFormatter}
-                    domain={modalContent.yAxisDomain}
-                  />
-                  <Tooltip formatter={modalContent.tooltipFormatter} />
-                  <Legend />
-                  <Bar
-                    dataKey="value"
-                    fill={modalContent.barFill || COLORS[0]}
-                    name={modalContent.barName || "Valor"}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : modalContent?.type === 'bar-vertical' ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={modalContent.data} layout="vertical" margin={{ top: 20, right: 30, left: 100, bottom: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis type="number" />
-                  <YAxis
-                    type="category"
-                    dataKey="name"
-                    style={{ fontSize: '12px' }}
-                    width={120}
-                  />
-                  <Tooltip formatter={modalContent.tooltipFormatter} />
-                  <Legend />
-                  <Bar
-                    dataKey="value"
-                    fill={modalContent.barFill || COLORS[1]}
-                    name={modalContent.barName || "Valor"}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : modalContent?.type === 'pie' && (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={modalContent.data}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    outerRadius="80%"
-                    fill="#8884d8" // Default fill, cells will override
-                    dataKey="value"
-                    label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
-                  >
-                    {modalContent.data.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value, name) => [value, name]} />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-          <DialogFooter className="p-4 border-t bg-gray-50">
-            <Button onClick={closeChartModal} variant="outline">
-              <XIcon className="w-4 h-4 mr-2" />
-              Fechar
+        <DialogContent className="max-w-6xl w-full max-h-[90vh] flex flex-col bg-gray-50 p-0">
+          <DialogHeader className="p-4 border-b bg-white rounded-t-lg flex-row items-center justify-between">
+            <DialogTitle className="text-xl text-gray-800">
+              {modalContent?.title}
+            </DialogTitle>
+            <Button variant="ghost" size="icon" onClick={closeChartModal} className="rounded-full">
+              <XIcon className="w-5 h-5" />
             </Button>
+          </DialogHeader>
+
+          <div className="flex-grow p-4 grid grid-cols-1 lg:grid-cols-3 gap-4 overflow-hidden">
+            {/* Chart Area */}
+            <div className="lg:col-span-2 bg-white rounded-lg p-4 shadow-sm border flex items-center justify-center h-full min-h-[400px]">
+              {modalContent && (
+                // Use a stable key for Google Charts to force re-render when modal content changes
+                modalContent.type.startsWith('google') ? (
+                  <Chart
+                    key={modalContent.title} // Added key for Google Charts to ensure re-render on content change
+                    chartType={modalContent.type === 'google-column' ? "ColumnChart" : "BarChart"}
+                    width="100%"
+                    height="100%" // Keep 100% as parent div has min-height
+                    data={modalContent.data}
+                    options={modalContent.options}
+                  />
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    {/* Recharts Bar Chart */}
+                    {modalContent.type === 'recharts-bar' && (
+                      <BarChart data={modalContent.data} layout={modalContent.layout || 'horizontal'} margin={{ top: 20, right: 30, left: modalContent.layout === 'vertical' ? 100 : 20, bottom: 50 }}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        {modalContent.layout === 'vertical' ? (
+                          <>
+                            <XAxis type="number" tickFormatter={(value) => value.toLocaleString('pt-BR')} />
+                            <YAxis dataKey={modalContent.nameKey} type="category" width={100} interval={0} style={{ fontSize: '12px' }}/>
+                          </>
+                        ) : (
+                          <>
+                            <XAxis dataKey={modalContent.nameKey} angle={-45} textAnchor="end" height={80} interval={0} style={{ fontSize: '12px' }} />
+                            <YAxis tickFormatter={(value) => value.toLocaleString('pt-BR')} domain={modalContent.yAxisDomain} />
+                          </>
+                        )}
+                        <Tooltip
+                          formatter={modalContent.valueFormatter ? (val) => [modalContent.valueFormatter(val), modalContent.chartName] : (val) => [val, modalContent.chartName]}
+                          cursor={{fill: 'rgba(239, 246, 255, 0.5)'}}
+                        />
+                        <Legend verticalAlign="top" wrapperStyle={{ paddingBottom: '20px' }} />
+                        <Bar dataKey={modalContent.dataKey} name={modalContent.chartName} fill="#22c55e" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    )}
+                    {/* Recharts Pie Chart */}
+                    {modalContent.type === 'recharts-pie' && (
+                      <PieChart>
+                        <Pie dataKey="value" data={modalContent.data} cx="50%" cy="50%" outerRadius={150} labelLine={false} label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}>
+                          {modalContent.data.map((_, index) => <Cell key={`cell-${index}`} fill={['#3b82f6', '#1d4ed8', '#1e40af', '#f97316', '#ea580c', '#c2410c'][index % 6]} />)}
+                        </Pie>
+                        <Tooltip formatter={(value) => [value, "Nº de Fretes"]} />
+                        <Legend />
+                      </PieChart>
+                    )}
+                  </ResponsiveContainer>
+                )
+              )}
+            </div>
+
+            {/* Data Table Area */}
+            <div className="lg:col-span-1 bg-white rounded-lg border shadow-sm flex flex-col h-full">
+              <h4 className="p-4 text-lg font-semibold border-b text-gray-700 flex-shrink-0">Dados Detalhados</h4>
+              <div className="flex-grow overflow-y-auto">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-left">
+                    <thead className="bg-gray-100 sticky top-0 z-10">
+                      <tr>
+                        {modalContent?.tableHeaders?.map((header, i) => (
+                          <th key={i} className="p-3 font-medium text-gray-600 whitespace-nowrap">{header}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {modalContent?.data?.slice(modalContent.type.startsWith('google') ? 1 : 0).map((row, i) => (
+                        <tr key={i} className="border-b hover:bg-gray-50">
+                          <td className="p-3 whitespace-nowrap">
+                            {modalContent.type.startsWith('google') ? row[0] : row[modalContent.nameKey || 'name']}
+                          </td>
+                          <td className="p-3 font-medium whitespace-nowrap">
+                            {modalContent.valueFormatter
+                              ? modalContent.valueFormatter(modalContent.type.startsWith('google') ? row[1] : row[modalContent.dataKey || 'value'])
+                              : (modalContent.type.startsWith('google') ? row[1] : row[modalContent.dataKey || 'value'])
+                            }
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="p-4 border-t bg-white rounded-b-lg">
+            <Button variant="outline" onClick={closeChartModal}>Fechar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

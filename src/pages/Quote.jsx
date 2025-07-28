@@ -20,13 +20,14 @@ import { ptBR } from "date-fns/locale";
 import { getBrazilIsoNow } from '../utils/getBrazilIsoNow';
 import { sendEmail } from '../utils/sendEmail';
 import RouteMapComponent from '../components/RouteMapComponent';
+import CityCombobox from '../components/CityCombobox'; // ✅ IMPORTADO O NOVO COMPONENTE
 
 // IMPORTANDO DADOS LOCAIS
 import { states as statesData } from '../components/data/states';
 import { cities as allCitiesData } from '../components/data/cities';
 
 // Opções pré-definidas para o campo Gerente
-const managerOptions = ["TIAGO LOPES TOLENTINO", "CLAUDIO FEUSER", "DIEGO JOSÉ MANIAS MARSÃO", "VENDA DIRETA"];
+const managerOptions = ["TIAGO LOPES TOLENTINO", "CLAUDIO FEUSER", "DIEGO JOSÉ MANIAS MARSÃO", "VENDA DIRETA", "VerdeLog"];
 
 export default function QuotePage() {
   const [formData, setFormData] = useState({
@@ -444,6 +445,16 @@ export default function QuotePage() {
         carrierProposals: {},
         status: 'negotiating',
         invoiceUrls: [],
+        // ✅ NOVO: Salvar os dados da rota calculada
+        routeData: routeData ? {
+          origin: routeData.origin.coordinates,
+          destination: routeData.destination.coordinates,
+          route: {
+            distance: routeData.route.distance,
+            duration: routeData.route.duration,
+            geometry: routeData.route.geometry
+          }
+        } : null,
         created_date: getBrazilIsoNow(),
         updated_date: getBrazilIsoNow()
       };
@@ -794,32 +805,17 @@ export default function QuotePage() {
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Cidade de Destino *
                     </label>
-                    <Select
+                    {/* ✅ SUBSTITUÍDO O SELECT PELO COMBOBOX */}
+                    <CityCombobox
                       value={formData.destinationCity}
-                      onValueChange={(value) => handleInputChange('destinationCity', value)}
+                      onChange={(value) => handleInputChange('destinationCity', value)}
                       disabled={!formData.destinationState || routeLoading}
-                    >
-                      <SelectTrigger className="border-gray-300">
-                        <SelectValue placeholder={
-                          !formData.destinationState ? 'Selecione um estado primeiro' :
-                          cities.length === 0 ? 'Carregando cidades...' :
-                          'Selecione a cidade'
-                        } />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {cities.length > 0 ? (
-                          cities.map(city => (
-                            <SelectItem key={city.ID} value={city.Nome}>{city.Nome}</SelectItem>
-                          ))
-                        ) : (
-                          formData.destinationState && (
-                            <SelectItem value={null} disabled>
-                              {cities.length === 0 ? 'Nenhuma cidade encontrada' : 'Carregando...'}
-                            </SelectItem>
-                          )
-                        )}
-                      </SelectContent>
-                    </Select>
+                      cities={cities}
+                      placeholder={
+                        !formData.destinationState ? 'Selecione um estado primeiro' :
+                        'Selecione a cidade'
+                      }
+                    />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">

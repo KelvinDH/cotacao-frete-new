@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { HandshakeIcon, Percent, CheckCircle, DollarSign, Weight, MapPin, FileText, Truck, Route, CalendarDays, Search, ChevronDown, ChevronUp, Info, Send, XCircle, Users, Clock, AlertTriangle, Edit, Trash2, Map, Save, Ban, Upload, Eye, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { FreightMap, Carrier, User, TruckType, UploadFile } from "@/components/ApiDatabase";
@@ -25,6 +26,7 @@ import {
   DialogTitle,
   DialogFooter
 } from "@/components/ui/dialog";
+import RouteMapComponent from '../components/RouteMapComponent';
 
 
 export default function NegotiationPage() {
@@ -834,6 +836,7 @@ export default function NegotiationPage() {
       })
       .sort(([, groupA], [, groupB]) => {
         // Sort by the created date of the first item in the group (which should be consistent)
+        // ✅ CORREÇÃO: Corrigido o erro de sintaxe btoa[0] para groupB[0]
         return new Date(groupB[0].created_date) - new Date(groupA[0].created_date);
       });
 
@@ -1061,67 +1064,104 @@ export default function NegotiationPage() {
                   </CardHeader>
 
                 <CardContent className="p-4 md:p-6 space-y-6">
-                  {/* Informações da Rota */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center md:text-left">
-                      <div className="p-3 bg-gray-50 rounded-lg">
-                          <p className="text-sm text-gray-500">Origem → Destino</p>
-                          <p className="font-bold text-lg text-gray-800">{firstMap.origin} → {firstMap.destination}</p>
-                      </div>
-                      <div className="p-3 bg-gray-50 rounded-lg">
-                          <p className="text-sm text-gray-500">Peso Total</p>
-                          <p className="font-bold text-lg text-gray-800">{firstMap.weight?.toLocaleString('pt-BR')} kg</p>
-                      </div>
-                      <div className="p-3 bg-green-50 rounded-lg border border-green-200">
-                          <p className="text-sm text-green-700">Valor do Mapa</p>
-                          <p className="font-bold text-lg text-green-800">R$ {firstMap.mapValue?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
-                      </div>
-                  </div>
-
-                  {/* Indicador da menor proposta */}
-                  {lowestCarrier && currentUser?.userType !== 'carrier' && (
-                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                      <p className="text-sm text-yellow-800 flex items-center">
-                        <AlertTriangle className="w-4 h-4 mr-2" />
-                        <strong>Menor proposta:</strong> {lowestCarrier} - R$ {lowestValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Informações dos Gerentes */}
-                  {currentUser?.userType !== 'carrier' && firstMap.managers?.length > 0 && (
-                    <div className="bg-teal-50 border border-teal-200 rounded-lg p-4">
-                      <h4 className="font-semibold text-gray-800 mb-2 flex items-center">
-                        <Users className="w-5 h-5 mr-2 text-teal-600" /> Gerentes Associados
-                      </h4>
-                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                        {firstMap.managers.map((m, i) => (
-                          <div key={i} className="bg-white p-2 rounded border">
-                            <p className="font-medium text-gray-700">{m.gerente}</p>
-                            <p className="text-sm text-teal-700 font-semibold">R$ {parseFloat(m.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Coluna Esquerda - Detalhes do Frete */}
+                    <div className="space-y-4">
+                      {/* Informações da Rota */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center md:text-left">
+                          <div className="p-3 bg-gray-50 rounded-lg">
+                              <p className="text-sm text-gray-500">Origem → Destino</p>
+                              <p className="font-bold text-lg text-gray-800">{firstMap.origin} → {firstMap.destination}</p>
                           </div>
-                        ))}
+                          <div className="p-3 bg-gray-50 rounded-lg">
+                              <p className="text-sm text-gray-500">Peso Total</p>
+                              <p className="font-bold text-lg text-gray-800">{firstMap.weight?.toLocaleString('pt-BR')} kg</p>
+                          </div>
+                          <div className="p-3 bg-green-50 rounded-lg border border-green-200">
+                              <p className="text-sm text-green-700">Valor do Mapa</p>
+                              <p className="font-bold text-lg text-green-800">R$ {firstMap.mapValue?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                          </div>
                       </div>
+
+                      {/* Indicador da menor proposta */}
+                      {lowestCarrier && currentUser?.userType !== 'carrier' && (
+                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                          <p className="text-sm text-yellow-800 flex items-center">
+                            <AlertTriangle className="w-4 h-4 mr-2" />
+                            <strong>Menor proposta:</strong> {lowestCarrier} - R$ {lowestValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Informações dos Gerentes */}
+                      {currentUser?.userType !== 'carrier' && firstMap.managers?.length > 0 && (
+                        <div className="bg-teal-50 border border-teal-200 rounded-lg p-4">
+                          <h4 className="font-semibold text-gray-800 mb-2 flex items-center">
+                            <Users className="w-5 h-5 mr-2 text-teal-600" /> Gerentes Associados
+                          </h4>
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                            {firstMap.managers.map((m, i) => (
+                              <div key={i} className="bg-white p-2 rounded border">
+                                <p className="font-medium text-gray-700">{m.gerente}</p>
+                                <p className="text-sm text-teal-700 font-semibold">R$ {parseFloat(m.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  )}
-                  
-                  {/* Imagem do Mapa */}
-                  {firstMap.mapImage && (
-                    <div className="bg-gray-50 rounded-lg p-4 border">
-                      <h4 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-                        <Map className="w-5 h-5 mr-2 text-blue-600" />
-                        Mapa da Rota
-                      </h4>
-                      <div className="flex justify-center">
-                        <a href={firstMap.mapImage} target="_blank" rel="noopener noreferrer" className="block">
-                          <img
-                            src={firstMap.mapImage}
-                            alt="Mapa da Rota"
-                            className="max-w-full h-auto max-h-[400px] object-contain rounded-md shadow-sm"
+
+                    {/* Coluna Direita - Mapa da Rota e Imagem */}
+                    <div className="space-y-4">
+                      {/* NOVO: Seção do Mapa da Rota */}
+                      {firstMap.routeData && 
+                       firstMap.routeData.origin && 
+                       firstMap.routeData.destination && 
+                       firstMap.routeData.route && 
+                       Array.isArray(firstMap.routeData.origin) && 
+                       Array.isArray(firstMap.routeData.destination) && 
+                       firstMap.routeData.origin.length >= 2 && 
+                       firstMap.routeData.destination.length >= 2 && (
+                        <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                          <h4 className="font-semibold text-blue-800 mb-3 flex items-center">
+                            <Route className="w-5 h-5 mr-2" />
+                            Rota Calculada
+                          </h4>
+                          <RouteMapComponent
+                            origin={firstMap.routeData.origin}
+                            destination={firstMap.routeData.destination}
+                            route={firstMap.routeData.route}
+                            height="300px"
                           />
-                        </a>
-                      </div>
+                          <div className="mt-3 text-sm text-blue-700 bg-blue-100 rounded p-2">
+                            <div className="flex justify-between items-center">
+                              <span>📏 Distância: <strong>{firstMap.routeData.route.distance || 'N/A'} km</strong></span>
+                              <span>⏱️ Tempo estimado: <strong>{firstMap.routeData.route.duration ? `${Math.floor(firstMap.routeData.route.duration / 60)}h ${Math.round(firstMap.routeData.route.duration % 60)}m` : 'N/A'}</strong></span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Imagem do Mapa (existente) */}
+                      {firstMap.mapImage && (
+                        <div className="bg-gray-50 rounded-lg p-4 border">
+                          <h4 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                            <Map className="w-5 h-5 mr-2 text-blue-600" />
+                            Mapa da Rota
+                          </h4>
+                          <div className="flex justify-center">
+                            <a href={firstMap.mapImage} target="_blank" rel="noopener noreferrer" className="block">
+                              <img
+                                src={firstMap.mapImage}
+                                alt="Mapa da Rota"
+                                className="max-w-full h-auto max-h-[400px] object-contain rounded-md shadow-sm"
+                              />
+                            </a>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  )}
+                  </div>
                   
                   {/* SEÇÃO ATUALIZADA: Propostas com funcionalidade de edição */}
                   <div className="pt-6 border-t">
