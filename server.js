@@ -1,12 +1,11 @@
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
-const cors =require('cors');
+const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const bcrypt = require('bcrypt');
 const sgMail = require('@sendgrid/mail');
-//const fetch = require('node-fetch');
 require('dotenv').config();
 
 console.log('Variáveis de ambiente carregadas:');
@@ -19,12 +18,18 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 const app = express();
 const PORT = 3001;
 
+// ✅ CORREÇÃO: Aumenta o limite do corpo da requisição para evitar o erro "Payload Too Large".
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
 // Middleware
 app.use(cors({
     origin: ['http://localhost:3001', 'http://localhost:5173', 'http://10.0.2.4:5173'],
     credentials: true
 }));
-app.use(express.json());
+
+// ✅ CORREÇÃO: Removida a linha duplicada 'app.use(express.json())' que estava sobrescrevendo a configuração de limite.
+
 app.use('/uploads', express.static('uploads'));
 
 // Configuração do multer para upload de arquivos
@@ -46,6 +51,14 @@ const upload = multer({ storage: storage });
 
 // Conexão com o banco de dados SQLite
 let db = null;
+
+// ✅ CORREÇÃO: Função para obter a data/hora atual no fuso horário de Brasília
+const getBrazilIsoNow = () => {
+    const now = new Date();
+    // Esta é uma forma de ajustar o fuso horário para 'America/Sao_Paulo'
+    const brazilTime = new Date(now.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+    return brazilTime.toISOString();
+};
 
 const initDatabase = () => {
     db = new sqlite3.Database('./freight_system.db', (err) => {
@@ -196,7 +209,7 @@ const createTables = () => {
         }
     });
 
-    // ✅ CORREÇÃO: Definição da tabela freight_maps SEM a restrição UNIQUE no mapNumber
+    // Definição da tabela freight_maps
     db.run(`
         CREATE TABLE IF NOT EXISTS freight_maps (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -226,20 +239,20 @@ const createTables = () => {
             justification TEXT,
             rejectedReason TEXT,
             finalizationObservation TEXT,
+            routeData TEXT,
             editObservations TEXT DEFAULT '[]'
         )
     `, (err) => {
         if (err) console.error('❌ Erro ao criar tabela freight_maps:', err);
         else {
             console.log('✅ Tabela freight_maps criada/verificada');
-            // ✅ NOVO: Verificar e corrigir a tabela existente se ela tiver a constraint errada
             checkAndFixFreightMapsConstraint();
             runMigrations();
         }
     });
 };
 
-// Função para inserir dados dos estados brasileiros
+// ... (O restante das funções de setup, como insertStatesData, syncCitiesData, etc., continuam iguais) ...
 const insertStatesData = () => {
     db.get('SELECT COUNT(*) as count FROM states', (err, row) => {
         if (err) return console.error('❌ Erro ao verificar estados:', err);
@@ -285,8 +298,6 @@ const insertStatesData = () => {
     });
 };
 
-// Função para inserir algumas cidades principais (você pode expandir essa lista)
-// ✅ NOVA FUNÇÃO DE SINCRONIZAÇÃO DE CIDADES
 const syncCitiesData = () => {
     console.log('🔄 Sincronizando tabela de cidades...');
 
@@ -341,8 +352,7 @@ const syncCitiesData = () => {
         // Santa Catarina
         {name: 'Florianópolis', uf: 'SC'}, {name: 'Joinville', uf: 'SC'}, {name: 'Blumenau', uf: 'SC'}, {name: 'São José', uf: 'SC'}, {name: 'Criciúma', uf: 'SC'}, {name: 'Chapecó', uf: 'SC'}, {name: 'Itajaí', uf: 'SC'},
         // São Paulo
-        {name: 'São Paulo', uf: 'SP'}, {name: 'Guarulhos', uf: 'SP'}, {name: 'Campinas', uf: 'SP'}, {name: 'São Bernardo do Campo', uf: 'SP'}, {name: 'Santo André', uf: 'SP'}, {name: 'Osasco', uf: 'SP'}, {name: 'São José dos Campos', uf: 'SP'}, {name: 'Ribeirão Preto', uf: 'SP'}, {name: 'Sorocaba', uf: 'SP'}, {name: 'Santos', uf: 'SP'}, {name: 'Mauá', uf: 'SP'}, {name: 'São José do Rio Preto', uf: 'SP'}, {name: 'Mogi das Cruzes', uf: 'SP'}, {name: 'Diadema', uf: 'SP'}, {name: 'Jundiaí', uf: 'SP'}, {name: 'Carapicuíba', uf: 'SP'}, {name: 'Piracicaba', uf: 'SP'}, {name: 'Bauru', uf: 'SP'}, {name: 'Itaquaquecetuba', uf: 'SP'}, {name: 'São Vicente', uf: 'SP'}, {name: 'Franca', uf: 'SP'}, {name: 'Guarujá', uf: 'SP'}, {name: 'Taubaté', uf: 'SP'}, {name: 'Praia Grande', uf: 'SP'}, {name: 'Limeira', uf: 'SP'}, {name: 'Suzano', uf: 'SP'}, {name: 'Taboão da Serra', uf: 'SP'}, {name: 'Sumaré', uf: 'SP'}, {name: 'Barueri', uf: 'SP'}, {name: 'Embu das Artes', uf: 'SP'}, {name: 'São Carlos', uf: 'SP'}, {name: 'Marília', uf: 'SP'}, {name: 'Americana', uf: 'SP'}, {name: 'Presidente Prudente', uf: 'SP'}, {name: 'Araraquara', uf: 'SP'}, {name: 'Indaiatuba', uf: 'SP'}, {name: 'Jacareí', uf: 'SP'}, {name: 'Hortolândia', uf: 'SP'}, {name: 'Itu', uf: 'SP'}, {name: 'Cotia', uf: 'SP'}, {name: 'Pindamonhangaba', uf: 'SP'}, {name: 'Pederneiras', uf: 'SP'}, {name: 'Piracicaba', uf: 'SP'},
-        {name: 'Americana', uf: 'SP'},   
+        {name: 'São Paulo', uf: 'SP'}, {name: 'Guarulhos', uf: 'SP'}, {name: 'Campinas', uf: 'SP'}, {name: 'São Bernardo do Campo', uf: 'SP'}, {name: 'Santo André', uf: 'SP'}, {name: 'Osasco', uf: 'SP'}, {name: 'São José dos Campos', uf: 'SP'}, {name: 'Ribeirão Preto', uf: 'SP'}, {name: 'Sorocaba', uf: 'SP'}, {name: 'Santos', uf: 'SP'}, {name: 'Mauá', uf: 'SP'}, {name: 'São José do Rio Preto', uf: 'SP'}, {name: 'Mogi das Cruzes', uf: 'SP'}, {name: 'Diadema', uf: 'SP'}, {name: 'Jundiaí', uf: 'SP'}, {name: 'Carapicuíba', uf: 'SP'}, {name: 'Piracicaba', uf: 'SP'}, {name: 'Bauru', uf: 'SP'}, {name: 'Itaquaquecetuba', uf: 'SP'}, {name: 'São Vicente', uf: 'SP'}, {name: 'Franca', uf: 'SP'}, {name: 'Guarujá', uf: 'SP'}, {name: 'Taubaté', uf: 'SP'}, {name: 'Praia Grande', uf: 'SP'}, {name: 'Limeira', uf: 'SP'}, {name: 'Suzano', uf: 'SP'}, {name: 'Taboão da Serra', uf: 'SP'}, {name: 'Sumaré', uf: 'SP'}, {name: 'Barueri', uf: 'SP'}, {name: 'Embu das Artes', uf: 'SP'}, {name: 'São Carlos', uf: 'SP'}, {name: 'Marília', uf: 'SP'}, {name: 'Americana', uf: 'SP'}, {name: 'Presidente Prudente', uf: 'SP'}, {name: 'Araraquara', uf: 'SP'}, {name: 'Indaiatuba', uf: 'SP'}, {name: 'Jacareí', uf: 'SP'}, {name: 'Hortolândia', uf: 'SP'}, {name: 'Itu', uf: 'SP'}, {name: 'Cotia', uf: 'SP'}, {name: 'Pindamonhangaba', uf: 'SP'}, {name: 'Pederneiras', uf: 'SP'},
         // Sergipe
         {name: 'Aracaju', uf: 'SE'}, {name: 'Nossa Senhora do Socorro', uf: 'SE'}, {name: 'Lagarto', uf: 'SE'},
         // Tocantins
@@ -388,7 +398,6 @@ const syncCitiesData = () => {
     });
 };
 
-// ✅ NOVA FUNÇÃO: Verifica e corrige a constraint UNIQUE se ela existir na tabela antiga
 const checkAndFixFreightMapsConstraint = () => {
     db.get("SELECT sql FROM sqlite_master WHERE type='table' AND name='freight_maps'", (err, row) => {
         if (err) {
@@ -396,7 +405,6 @@ const checkAndFixFreightMapsConstraint = () => {
             return;
         }
         
-        // Verifica se a palavra UNIQUE está associada à coluna mapNumber
         if (row && row.sql.match(/mapNumber\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i)) {
             console.log('⚠️ Constraint UNIQUE problemática encontrada na coluna mapNumber. Recriando tabela...');
             
@@ -435,13 +443,14 @@ const checkAndFixFreightMapsConstraint = () => {
                         justification TEXT,
                         rejectedReason TEXT,
                         finalizationObservation TEXT,
+                        routeData TEXT,
                         editObservations TEXT DEFAULT '[]'
                     )
                 `, (err) => {
                     if (err) return console.error("Erro ao criar nova tabela freight_maps:", err);
                 });
                 
-                db.run(`INSERT INTO freight_maps SELECT id, mapNumber, mapImage, origin, destination, totalKm, weight, mapValue, truckType, selectedCarrier, loadingMode, loadingDate, routeInfo, carrierProposals, finalValue, status, contractedAt, invoiceUrls, created_date, updated_date, created_by, managers, userCounterProposal, selectedCarrierForCounter, justification, rejectedReason, finalizationObservation, editObservations FROM freight_maps_old`, (err) => {
+                db.run(`INSERT INTO freight_maps (id, mapNumber, mapImage, origin, destination, totalKm, weight, mapValue, truckType, selectedCarrier, loadingMode, loadingDate, routeInfo, carrierProposals, finalValue, status, contractedAt, invoiceUrls, created_date, updated_date, created_by, managers, userCounterProposal, selectedCarrierForCounter, justification, rejectedReason, finalizationObservation, routeData, editObservations) SELECT id, mapNumber, mapImage, origin, destination, totalKm, weight, mapValue, truckType, selectedCarrier, loadingMode, loadingDate, routeInfo, carrierProposals, finalValue, status, contractedAt, invoiceUrls, created_date, updated_date, created_by, managers, userCounterProposal, selectedCarrierForCounter, justification, rejectedReason, finalizationObservation, routeData, editObservations FROM freight_maps_old`, (err) => {
                     if (err) return console.error("Erro ao copiar dados da tabela antiga:", err);
                 });
                 
@@ -460,10 +469,14 @@ const runMigrations = () => {
     db.all("PRAGMA table_info(freight_maps)", (err, columns) => {
         if (err) return console.error("❌ Erro ao ler estrutura da tabela freight_maps:", err.message);
         
-        const runAlter = (colName, colType) => {
+        const runAlter = (colName, colType, defaultValue = null) => {
             if (!columns.some(col => col.name === colName)) {
                 console.log(`⚠️ Coluna '${colName}' não encontrada. Adicionando...`);
-                db.run(`ALTER TABLE freight_maps ADD COLUMN ${colName} ${colType}`, (err) => {
+                let alterStatement = `ALTER TABLE freight_maps ADD COLUMN ${colName} ${colType}`;
+                if (defaultValue) {
+                    alterStatement += ` DEFAULT ${defaultValue}`;
+                }
+                db.run(alterStatement, (err) => {
                     if (err) console.error(`❌ Erro ao adicionar a coluna ${colName}:`, err.message);
                     else console.log(`✅ Coluna '${colName}' adicionada com sucesso!`);
                 });
@@ -476,7 +489,8 @@ const runMigrations = () => {
         runAlter('justification', 'TEXT');
         runAlter('rejectedReason', 'TEXT');
         runAlter('finalizationObservation', 'TEXT');
-        runAlter('editObservations', "TEXT DEFAULT '[]'");
+        runAlter('editObservations', "TEXT", "'[]'");
+        runAlter('routeData', 'TEXT');
     });
 };
 
@@ -693,7 +707,7 @@ app.put('/api/truck-types/:id', (req, res) => {
 app.delete('/api/truck-types/:id', (req, res) => {
     if (!db) return res.status(500).json({ error: 'Banco de dados não conectado' });
     db.run('DELETE FROM truck_types WHERE id = ?', [req.params.id], function(err) {
-        if (err) return res.status(500).json({ error: err.message });
+        if (err) return res.status(500).json({ error: 'Tipo de caminhão não encontrado' });
         if (this.changes === 0) return res.status(404).json({ error: 'Tipo de caminhão não encontrado' });
         res.json({ message: 'Tipo de caminhão deletado com sucesso' });
     });
@@ -745,91 +759,141 @@ app.delete('/api/carriers/:id', (req, res) => {
 
 // Rotas CRUD para Freight Maps
 app.get('/api/freight-maps', (req, res) => {
-    if (!db) return res.status(500).json({ error: 'Banco de dados não conectado' });
-    let query = 'SELECT * FROM freight_maps';
+    const filters = req.query;
+    let sql = "SELECT * FROM freight_maps";
     const params = [];
-    const whereClauses = [];
-    if (req.query.status) {
-        whereClauses.push('status = ?');
-        params.push(req.query.status);
-    }
-    if (req.query.selectedCarrier) {
-        whereClauses.push('selectedCarrier = ?');
-        params.push(req.query.selectedCarrier);
-    }
-    if (req.query.loadingMode) {
-        const modes = req.query.loadingMode.split(',');
-        const placeholders = modes.map(() => '?').join(',');
-        whereClauses.push(`loadingMode IN (${placeholders})`);
-        params.push(...modes);
-    }
-    if (whereClauses.length > 0) {
-        query += ' WHERE ' + whereClauses.join(' AND ');
-    }
-    query += ' ORDER BY created_date DESC';
-    db.all(query, params, (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        rows.forEach(row => {
-            row.managers = JSON.parse(row.managers || '[]');
-            row.carrierProposals = JSON.parse(row.carrierProposals || '{}');
-            row.invoiceUrls = JSON.parse(row.invoiceUrls || '[]');
-            row.editObservations = JSON.parse(row.editObservations || '[]');
+
+    // Lógica de filtro (se você tiver)
+    if (Object.keys(filters).length > 0) {
+        sql += " WHERE ";
+        const filterClauses = Object.keys(filters).map(key => {
+            params.push(filters[key]);
+            return `${key} = ?`;
         });
-        res.json(rows);
+        sql += filterClauses.join(' AND ');
+    }
+    sql += " ORDER BY created_date DESC";
+
+
+    db.all(sql, params, (err, rows) => {
+        if (err) {
+            return res.status(400).json({ "error": err.message });
+        }
+        
+        // Mapear os resultados para converter campos JSON de volta para objetos
+        const data = rows.map(row => {
+            return {
+                ...row,
+                managers: JSON.parse(row.managers || '[]'),
+                carrierProposals: JSON.parse(row.carrierProposals || '{}'),
+                invoiceUrls: JSON.parse(row.invoiceUrls || '[]'),
+                editObservations: JSON.parse(row.editObservations || '[]'),
+                routeData: JSON.parse(row.routeData || 'null')
+            };
+        });
+
+        res.json(data);
     });
 });
 
-// ✅ CORREÇÃO: Removida a verificação de mapa existente para permitir múltiplas inserções
+// ✅ CORREÇÃO COMPLETA: Rota para criar um novo freight map
 app.post('/api/freight-maps', (req, res) => {
     if (!db) return res.status(500).json({ error: 'Banco de dados não conectado' });
-    const data = req.body;
-
-    console.log(`📦 Criando freight map: ${data.mapNumber} para ${data.selectedCarrier}`);
     
-    db.run(`
+    // Desestrutura todos os campos esperados do corpo da requisição
+    const {
+        mapNumber, mapImage, origin, destination, totalKm, weight, mapValue,
+        truckType, selectedCarrier, loadingMode, loadingDate, routeInfo,
+        managers, carrierProposals, status, created_by, editObservations, routeData
+    } = req.body;
+
+    console.log(`📦 Criando freight map: ${mapNumber} para ${selectedCarrier}`);
+    
+    // Obtém a data/hora atual para os campos de criação e atualização
+    const now = getBrazilIsoNow();
+
+    // Query SQL corrigida com todas as colunas e placeholders correspondentes
+    const sql = `
         INSERT INTO freight_maps (
             mapNumber, mapImage, origin, destination, totalKm, weight, mapValue, 
             truckType, selectedCarrier, loadingMode, loadingDate, routeInfo, 
-            managers, carrierProposals, status, created_by, editObservations
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-        data.mapNumber, data.mapImage || '', data.origin, data.destination,
-        data.totalKm, data.weight, data.mapValue, data.truckType,
-        data.selectedCarrier, data.loadingMode, data.loadingDate,
-        data.routeInfo || '', JSON.stringify(data.managers || []), 
-        JSON.stringify(data.carrierProposals || {}), data.status || 'negotiating', 
-        data.created_by || 'system', JSON.stringify(data.editObservations || [])
-    ], function(err) {
+            managers, carrierProposals, status, created_by, editObservations, routeData,
+            created_date, updated_date
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+    
+    // Array de parâmetros corrigido, garantindo que todos os valores sejam do tipo correto
+    const params = [
+        mapNumber,
+        mapImage || '',
+        origin,
+        destination,
+        totalKm,
+        weight,
+        mapValue,
+        truckType,
+        selectedCarrier,
+        loadingMode,
+        loadingDate,
+        routeInfo || '',
+        JSON.stringify(managers || []),
+        JSON.stringify(carrierProposals || {}),
+        status || 'negotiating',
+        created_by || 'system',
+        JSON.stringify(editObservations || []),
+        JSON.stringify(routeData || null), // Salva o objeto routeData como texto JSON
+        now, // Data de criação
+        now  // Data de atualização
+    ];
+
+    db.run(sql, params, function(err) {
         if (err) {
             console.error('❌ Erro ao criar freight map:', err);
             return res.status(500).json({ error: err.message });
         }
-        console.log(`✅ Freight map criado com sucesso: ${data.mapNumber} para ${data.selectedCarrier} (ID: ${this.lastID})`);
-        res.json({ id: this.lastID, message: 'Freight map criado com sucesso' });
+        const createdId = this.lastID;
+        console.log(`✅ Freight map criado com sucesso: ${mapNumber} para ${selectedCarrier} (ID: ${createdId})`);
+        
+        // Retorna o objeto completo que foi criado, incluindo o novo ID
+        db.get('SELECT * FROM freight_maps WHERE id = ?', [createdId], (err, row) => {
+             if (err) {
+                return res.status(500).json({ error: "Erro ao buscar o mapa recém-criado."});
+            }
+            // Parseia os campos JSON antes de retornar
+            row.managers = JSON.parse(row.managers || '[]');
+            row.carrierProposals = JSON.parse(row.carrierProposals || '{}');
+            row.invoiceUrls = JSON.parse(row.invoiceUrls || '[]');
+            row.editObservations = JSON.parse(row.editObservations || '[]');
+            row.routeData = JSON.parse(row.routeData || 'null');
+            res.status(201).json(row);
+        });
     });
 });
+
 
 app.put('/api/freight-maps/:id', (req, res) => {
     if (!db) return res.status(500).json({ error: 'Banco de dados não conectado' });
     const { id } = req.params;
     const updates = req.body;
     
+    // ✅ CORREÇÃO: Adiciona o tratamento para routeData ao atualizar
     if (updates.managers) updates.managers = JSON.stringify(updates.managers);
     if (updates.carrierProposals) updates.carrierProposals = JSON.stringify(updates.carrierProposals);
     if (updates.invoiceUrls) updates.invoiceUrls = JSON.stringify(updates.invoiceUrls);
+    if (updates.routeData) updates.routeData = JSON.stringify(updates.routeData); // <-- Adicionado
     if (updates.editObservations) {
-        if (!Array.isArray(JSON.parse(JSON.stringify(updates.editObservations)))) {
+        if (!Array.isArray(updates.editObservations)) {
             return res.status(400).json({ error: 'editObservations deve ser um array.' });
         }
         updates.editObservations = JSON.stringify(updates.editObservations);
     }
 
-    const fields = Object.keys(updates);
+    const fields = Object.keys(updates).filter(key => key !== 'id'); // Evita incluir 'id' no update
     if (fields.length === 0) return res.status(400).json({ error: 'Nenhum campo para atualizar' });
     
     const setClause = fields.map(field => `${field} = ?`).join(', ');
     
-    db.run(`UPDATE freight_maps SET ${setClause}, updated_date = CURRENT_TIMESTAMP WHERE id = ?`, [...Object.values(updates), id], function(err) {
+    db.run(`UPDATE freight_maps SET ${setClause}, updated_date = ? WHERE id = ?`, [...Object.values(updates), getBrazilIsoNow(), id], function(err) {
         if (err) return res.status(500).json({ error: err.message });
         if (this.changes === 0) return res.status(404).json({ error: 'Freight map não encontrado' });
         
@@ -839,7 +903,9 @@ app.put('/api/freight-maps/:id', (req, res) => {
                 row.managers = JSON.parse(row.managers || '[]');
                 row.carrierProposals = JSON.parse(row.carrierProposals || '{}');
                 row.invoiceUrls = JSON.parse(row.invoiceUrls || '[]');
-                row.editObservations = JSON.parse(row.editObservations || '[]');
+                row.editObservations = JSON.parse(row.editObservations || '[]'
+                );
+                row.routeData = JSON.parse(row.routeData || 'null'); // <-- Adicionado
             }
             res.json(row);
         });
@@ -867,7 +933,7 @@ app.delete('/api/freight-maps/:id', (req, res) => {
      console.log('SUBJECT:', subject);
      console.log('=== FIM DEBUG EMAIL ===');
      if (!to || !subject || !html) return res.status(400).json({ error: 'Campos obrigatórios: to, subject, html' });
-     const msg = { to, from: process.env.SENDGRID_FROM_EMAIL, subject, html };
+     const msg = { to, from: { email: process.env.SENDGRID_FROM_EMAIL, name: 'UnionAgro Fretes' }, subject, html };
      console.log('Mensagem a ser enviada:', JSON.stringify(msg, null, 2));
      const response = await sgMail.send(msg);
      console.log('✅ SUCESSO! Resposta do SendGrid:', response[0].statusCode);
@@ -966,15 +1032,18 @@ app.post('/api/calculate-route', async (req, res) => {
         console.log('🗺️ Preparando cálculo de rota...');
 
         // Cálculo da rota
-        const routeUrl = `https://api.openrouteservice.org/v2/directions/driving-car?api_key=${apiKey}&start=${originCoords[0]},${originCoords[1]}&end=${destinationCoords[0]},${destinationCoords[1]}`;
+        const routeUrl = `https://api.openrouteservice.org/v2/directions/driving-car`;
         
         console.log('🔗 URL da rota:', routeUrl);
 
         const routeResponse = await fetch(routeUrl, {
-            method: 'GET',
+            method: 'POST',
             headers: {
-                'Accept': 'application/json, application/geo+json, application/gpx+xml, img/png; charset=utf-8'
-            }
+                'Accept': 'application/json, application/geo+json, application/gpx+xml, img/png; charset=utf-8',
+                'Content-Type': 'application/json',
+                'Authorization': apiKey
+            },
+            body: JSON.stringify({ coordinates: [originCoords, destinationCoords] })
         });
 
         console.log('📡 Status da resposta da rota:', routeResponse.status);
@@ -988,36 +1057,27 @@ app.post('/api/calculate-route', async (req, res) => {
         const routeData = await routeResponse.json();
         console.log('📊 Dados da rota recebidos com sucesso');
 
-        if (!routeData.features || routeData.features.length === 0) {
+        if (!routeData.routes || routeData.routes.length === 0) {
             console.error('❌ Nenhuma rota encontrada nos dados retornados');
             return res.status(500).json({ error: 'Nenhuma rota encontrada.' });
         }
 
         console.log('🔄 Processando dados da rota...');
-        const route = routeData.features[0];
+        const route = routeData.routes[0];
 
         // Tentativa de extrair o summary de diferentes locais possíveis
-        let summary = null;
+        let summary = route.summary;
         
-        if (route.properties && route.properties.summary) {
-            summary = route.properties.summary;
-            console.log('✅ Summary encontrado em route.properties.summary');
-        } else if (route.properties && route.properties.segments && route.properties.segments[0]) {
-            summary = route.properties.segments[0];
-            console.log('✅ Summary encontrado em route.properties.segments[0]');
-        } else if (route.summary) {
-            summary = route.summary;
-            console.log('✅ Summary encontrado em route.summary');
-        } else {
+        if (!summary) {
             console.error('❌ Estrutura de dados inesperada. Não foi possível encontrar o summary.');
             return res.status(500).json({ error: 'Dados de resumo da rota não encontrados.' });
         }
 
-        // ✅ NOVO: Extrair a geometria da rota (o caminho real pelas ruas)
+        // Extrair a geometria da rota (o caminho real pelas ruas)
         let geometry = null;
-        if (route.geometry && route.geometry.coordinates) {
+        if (route.geometry) {
             // Converter de [lon, lat] para [lat, lon] para o Leaflet
-            geometry = route.geometry.coordinates.map(coord => [coord[1], coord[0]]);
+            geometry = route.geometry.map(coord => [coord[1], coord[0]]);
             console.log('✅ Geometria da rota extraída:', geometry.length, 'pontos');
         } else {
             console.warn('⚠️ Geometria da rota não encontrada, usando linha reta');
@@ -1029,7 +1089,7 @@ app.post('/api/calculate-route', async (req, res) => {
             route: {
                 distance: Math.round(summary.distance / 1000),
                 duration: Math.round(summary.duration / 60),
-                geometry: geometry // ✅ NOVO: Adiciona a geometria da rota
+                geometry: geometry 
             }
         };
         
@@ -1048,7 +1108,7 @@ app.post('/api/calculate-route', async (req, res) => {
 // Inicializar banco de dados e servidor
 initDatabase();
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => { // ✅ CORREÇÃO: Faz o servidor escutar em todas as interfaces de rede
     console.log(`🚀 Servidor rodando em http://localhost:${PORT}`);
     console.log(`📁 Uploads disponíveis em http://localhost:${PORT}/uploads/`);
 });
